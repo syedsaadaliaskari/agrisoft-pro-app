@@ -1,0 +1,31 @@
+---
+description: Agri Soft Pro mobile companion — always follow MOBILE_BRIEF.md
+alwaysApply: true
+---
+
+# Agri Soft Pro mobile
+
+This repo is the **mobile companion** for Agri Soft Pro. Read and follow `MOBILE_BRIEF.md` before coding.
+
+## What this is
+Phone/tablet app for shop staff. It shares **Supabase Postgres** with the existing desktop ERP (Electron + Next.js + SQLite). Do not rewrite the desktop ERP.
+
+## Architecture
+Desktop (SQLite) ↔ Supabase Postgres ↔ Mobile app. Cloud sync only. No LAN / Wi‑Fi peer sync.
+
+## Current work
+Milestones 1–2 only until they work: Expo Router + TypeScript, env, Supabase client (anon + RLS), Home, Customers list/detail/search/pull-to-refresh, Settings.
+
+## Hard rules
+- Never put `SUPABASE_SERVICE_ROLE_KEY` in this app. Anon key + RLS only.
+- Scope every shop query by `tenant_id`. Dev: `tenant-dev-001`.
+- Ignore soft-deleted rows (`deleted_at` is not null).
+- Keep the same row ids as desktop (text/uuid).
+- Do not invent secrets. Ask for the anon key or use `.env`. Never commit `.env`.
+- Do not build Super Admin, licenses, LAN sync, WhatsApp, or a full POS before customers work.
+
+## Stack
+Expo + Expo Router + TypeScript + `@supabase/supabase-js`. Not Flutter, Ionic, web-as-app, or Electron.
+
+## UX
+Clear labels (Sale, Customer, Product). Names in lists, not codes. Calm agri-green UI. Large tap targets.

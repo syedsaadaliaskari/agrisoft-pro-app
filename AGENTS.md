@@ -1,3 +1,10 @@
-# Expo HAS CHANGED
+# Agri Soft Pro mobile
 
-Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+Read `MOBILE_BRIEF.md` before changing this repo.
+
+This is the shop-staff **mobile companion**, not a rewrite of the desktop ERP.
+
+- Stack: Expo + Expo Router + TypeScript + `@supabase/supabase-js`
+- Cloud only (Supabase). No LAN sync. No `SUPABASE_SERVICE_ROLE_KEY`.
+- Scope queries by `tenant_id`. Ignore `deleted_at` rows.
+- Current scope: milestones 1–2 (Home, Customers list/detail/search/refresh, Settings).
