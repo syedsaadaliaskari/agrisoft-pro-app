@@ -59,6 +59,14 @@ export default function RootLayout() {
           name="customer/[id]"
           options={{ title: 'Customer', headerBackTitle: 'Back' }}
         />
+        <Stack.Screen
+          name="customer/new"
+          options={{ title: 'New customer', headerBackTitle: 'Back' }}
+        />
+        <Stack.Screen
+          name="product/[id]"
+          options={{ title: 'Product', headerBackTitle: 'Back' }}
+        />
       </Stack>
     </ThemeProvider>
   );

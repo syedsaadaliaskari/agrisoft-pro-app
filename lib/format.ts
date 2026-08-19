@@ -18,3 +18,15 @@ export function displayOrDash(value: string | null | undefined): string {
   const trimmed = value?.trim();
   return trimmed ? trimmed : '—';
 }
+
+export function toNumber(value: number | string | null | undefined): number {
+  if (value === null || value === undefined || value === '') return 0;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+export function formatQty(value: number | string | null | undefined): string {
+  const n = toNumber(value);
+  if (Number.isInteger(n)) return n.toLocaleString();
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}

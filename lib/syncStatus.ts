@@ -2,12 +2,16 @@ type SyncSnapshot = {
   lastRefreshAt: string | null;
   lastError: string | null;
   customerCount: number | null;
+  productCount: number | null;
+  saleCount: number | null;
 };
 
 let snapshot: SyncSnapshot = {
   lastRefreshAt: null,
   lastError: null,
   customerCount: null,
+  productCount: null,
+  saleCount: null,
 };
 
 const listeners = new Set<() => void>();
@@ -20,11 +24,17 @@ export function getSyncStatus(): SyncSnapshot {
   return snapshot;
 }
 
-export function markRefreshSuccess(customerCount: number) {
+export function markRefreshSuccess(update: {
+  customerCount?: number;
+  productCount?: number;
+  saleCount?: number;
+}) {
   snapshot = {
     lastRefreshAt: new Date().toISOString(),
     lastError: null,
-    customerCount,
+    customerCount: update.customerCount ?? snapshot.customerCount,
+    productCount: update.productCount ?? snapshot.productCount,
+    saleCount: update.saleCount ?? snapshot.saleCount,
   };
   emit();
 }

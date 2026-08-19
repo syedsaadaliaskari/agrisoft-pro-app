@@ -14,7 +14,7 @@ Phone/tablet app for shop staff. It shares **Supabase Postgres** with the existi
 Desktop (SQLite) ↔ Supabase Postgres ↔ Mobile app. Cloud sync only. No LAN / Wi‑Fi peer sync.
 
 ## Current work
-Milestones 1–2 only until they work: Expo Router + TypeScript, env, Supabase client (anon + RLS), Home, Customers list/detail/search/pull-to-refresh, Settings.
+Milestones 1–3: Expo Router + TypeScript, env, Supabase client (anon + RLS), Home, Customers, Products (read-only), Settings.
 
 ## Hard rules
 - Never put `SUPABASE_SERVICE_ROLE_KEY` in this app. Anon key + RLS only.

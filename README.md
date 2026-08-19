@@ -16,6 +16,7 @@ Read [MOBILE_BRIEF.md](./MOBILE_BRIEF.md) for product rules and milestones.
 
 - Expo Router app with Home, Customers, Settings
 - Customer list, search (name/phone), detail, pull-to-refresh
+- Product list (read-only), search (name/brand), detail with size/color stock
 - Supabase client using the **anon** key only (never `service_role`)
 - Runs without keys: you will see a “waiting for keys” state until `.env` is filled
 

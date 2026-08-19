@@ -15,19 +15,19 @@ import { SearchBar } from '@/components/SearchBar';
 import { StatusBanner } from '@/components/StatusBanner';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { fetchCustomers, matchesCustomerSearch } from '@/lib/api';
+import { fetchProducts, matchesProductSearch, productStockQty } from '@/lib/api';
 import { getAppConfig } from '@/lib/config';
-import { displayOrDash } from '@/lib/format';
+import { formatMoney, formatQty } from '@/lib/format';
 import { markRefreshError, markRefreshSuccess } from '@/lib/syncStatus';
-import type { Customer } from '@/types/models';
+import type { Product } from '@/types/models';
 
-export default function CustomersScreen() {
+export default function ProductsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const router = useRouter();
   const config = getAppConfig();
   const [query, setQuery] = useState('');
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(config.isReady);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,11 +39,11 @@ export default function CustomersScreen() {
     setLoading(true);
     setError(null);
     try {
-      const rows = await fetchCustomers();
-      setCustomers(rows);
-      markRefreshSuccess({ customerCount: rows.length });
+      const rows = await fetchProducts();
+      setProducts(rows);
+      markRefreshSuccess({ productCount: rows.length });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not load customers.';
+      const message = err instanceof Error ? err.message : 'Could not load products.';
       setError(message);
       markRefreshError(message);
     } finally {
@@ -56,30 +56,22 @@ export default function CustomersScreen() {
   }, [load]);
 
   const visible = useMemo(
-    () => customers.filter((customer) => matchesCustomerSearch(customer, query)),
-    [customers, query],
+    () => products.filter((product) => matchesProductSearch(product, query)),
+    [products, query],
   );
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <SearchBar value={query} onChangeText={setQuery} />
-        <Pressable
-          onPress={() => router.push('/customer/new' as Href)}
-          style={({ pressed }) => [
-            styles.addBtn,
-            { backgroundColor: colors.tint, opacity: pressed ? 0.8 : 1 },
-          ]}>
-          <Text style={styles.addText}>Add customer</Text>
-        </Pressable>
+        <SearchBar value={query} onChangeText={setQuery} placeholder="Search by name or brand" />
         {!config.isReady ? (
           <StatusBanner
             tone="warn"
             title="Keys not added yet"
-            detail="The customer list will fill in after you add the anon key and restart Expo."
+            detail="The product list will fill in after you add the anon key and restart Expo."
           />
         ) : error ? (
-          <StatusBanner tone="error" title="Could not load customers" detail={error} />
+          <StatusBanner tone="error" title="Could not load products" detail={error} />
         ) : null}
       </View>
 
@@ -94,13 +86,13 @@ export default function CustomersScreen() {
         ListEmptyComponent={
           loading ? null : (
             <EmptyState
-              icon="people-outline"
-              title={query ? 'No matching customers' : 'No customers yet'}
+              icon="cube-outline"
+              title={query ? 'No matching products' : 'No products yet'}
               detail={
                 query
-                  ? 'Try a different name or phone.'
+                  ? 'Try a different name or brand.'
                   : config.isReady
-                    ? 'If customers appear in Supabase Table Editor, run docs/dev-rls.sql, then pull to refresh. If the table is empty, sync customers from the desktop first.'
+                    ? 'If products appear in Supabase Table Editor, run docs/dev-rls-products.sql, then pull to refresh. Desktop currently syncs customers only — products must already be in the cloud.'
                     : 'Add the anon key, then pull to refresh.'
               }
             />
@@ -108,7 +100,7 @@ export default function CustomersScreen() {
         }
         renderItem={({ item }) => (
           <Pressable
-            onPress={() => router.push(`/customer/${item.id}`)}
+            onPress={() => router.push(`/product/${item.id}` as Href)}
             style={({ pressed }) => [
               styles.row,
               {
@@ -120,8 +112,9 @@ export default function CustomersScreen() {
             <View style={styles.rowText}>
               <Text style={[styles.name, { color: colors.text }]}>{item.name}</Text>
               <Text style={[styles.meta, { color: colors.muted }]}>
-                {displayOrDash(item.phone)}
-                {item.city ? `  ·  ${item.city}` : ''}
+                Stock {formatQty(productStockQty(item))}
+                {item.brand ? `  ·  ${item.brand}` : ''}
+                {`  ·  ${formatMoney(item.sale_price)}`}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.muted} />
@@ -139,17 +132,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
     gap: 10,
-  },
-  addBtn: {
-    minHeight: 48,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
   },
   list: {
     paddingHorizontal: 16,
