@@ -18,10 +18,11 @@ Milestones 1–2 only until they work: Expo Router + TypeScript, env, Supabase c
 
 ## Hard rules
 - Never put `SUPABASE_SERVICE_ROLE_KEY` in this app. Anon key + RLS only.
-- Scope every shop query by `tenant_id`. Dev: `tenant-dev-001`.
+- Scope every shop query by `tenant_id`. Match the desktop shop id (`settings.supabase_tenant_id`, else `.env` `SUPABASE_TENANT_ID`). Dev fallback: `tenant-dev-001`.
 - Ignore soft-deleted rows (`deleted_at` is not null).
 - Keep the same row ids as desktop (text/uuid).
 - Do not invent secrets. Ask for the anon key or use `.env`. Never commit `.env`.
+- If RLS hides rows from anon, add create-only SELECT policies (`docs/dev-rls.sql`). Do not drop tables. Do not use service_role.
 - Do not build Super Admin, licenses, LAN sync, WhatsApp, or a full POS before customers work.
 
 ## Stack

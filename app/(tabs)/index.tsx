@@ -73,11 +73,17 @@ export default function HomeScreen() {
         <StatusBanner tone="error" title="Could not reach the cloud" detail={error} />
       ) : loading && !tenant ? (
         <StatusBanner loading title="Checking the shop…" detail="Reading tenant and customers from Supabase." />
-      ) : (
+      ) : tenant ? (
         <StatusBanner
           tone="ok"
           title="Connected"
-          detail={tenant ? `Tenant ${tenant.id}` : `Using tenant ${config.tenantId}`}
+          detail={`${tenant.name} · ${tenant.id}`}
+        />
+      ) : (
+        <StatusBanner
+          tone="warn"
+          title="Keys work, shop data is hidden"
+          detail="The anon key connected, but tenant-dev-001 is not visible. Either desktop has not synced yet, or a dev RLS policy is needed (see docs/dev-rls.sql)."
         />
       )}
 

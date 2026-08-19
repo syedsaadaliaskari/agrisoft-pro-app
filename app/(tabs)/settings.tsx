@@ -42,9 +42,12 @@ export default function SettingsScreen() {
       <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.heading, { color: colors.text }]}>How to add keys</Text>
         <Text style={[styles.body, { color: colors.muted }]}>
-          Copy .env.example to .env. Paste EXPO_PUBLIC_SUPABASE_ANON_KEY from the desktop .env
-          (NEXT_PUBLIC_SUPABASE_ANON_KEY) or from Supabase → Project Settings → API. Restart Expo
-          after saving. Never put SUPABASE_SERVICE_ROLE_KEY in this app.
+          Paste EXPO_PUBLIC_SUPABASE_ANON_KEY from the desktop (NEXT_PUBLIC_SUPABASE_ANON_KEY)
+          or Supabase → API. Never put SUPABASE_SERVICE_ROLE_KEY in this app.
+          {'\n\n'}
+          Shop tenant must match the PC: after Pro activation use settings.supabase_tenant_id;
+          otherwise desktop SUPABASE_TENANT_ID (dev fallback tenant-dev-001). Restart Expo
+          after changing .env.
         </Text>
       </View>
 

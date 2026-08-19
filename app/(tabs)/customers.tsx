@@ -92,7 +92,7 @@ export default function CustomersScreen() {
                 query
                   ? 'Try a different name or phone.'
                   : config.isReady
-                    ? 'Pull to refresh after the desktop syncs customers to the cloud.'
+                    ? 'If customers appear in Supabase Table Editor, run docs/dev-rls.sql, then pull to refresh. If the table is empty, sync customers from the desktop first.'
                     : 'Add the anon key, then pull to refresh.'
               }
             />
