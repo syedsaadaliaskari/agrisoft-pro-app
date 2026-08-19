@@ -30,5 +30,5 @@ export function getSupabase(): SupabaseClient | null {
 }
 
 export function missingKeysMessage(): string {
-  return 'Add EXPO_PUBLIC_SUPABASE_ANON_KEY to a .env file, then restart Expo.';
+  return "Couldn't load this data.";
 }

@@ -34,7 +34,7 @@ export function StatusBanner({ title, detail, tone = 'info', loading }: Props) {
     tone === 'ok' ? 'checkmark-circle' : tone === 'error' ? 'alert-circle' : tone === 'warn' ? 'warning' : 'information-circle';
 
   return (
-    <View style={[styles.wrap, { backgroundColor: background, borderColor: colors.border }]}>
+    <View style={[styles.wrap, { backgroundColor: background }]}>
       {loading ? (
         <ActivityIndicator color={colors.tint} />
       ) : (
@@ -53,8 +53,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },

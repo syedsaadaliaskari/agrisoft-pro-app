@@ -15,7 +15,7 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search by name o
   const colors = Colors[scheme];
 
   return (
-    <View style={[styles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <View style={[styles.wrap, { backgroundColor: colors.card }]}>
       <Ionicons name="search" size={20} color={colors.muted} />
       <TextInput
         value={value}
@@ -37,9 +37,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     minHeight: 52,
-    borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 16,
     paddingHorizontal: 14,
+    shadowColor: '#1A2E24',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   input: {
     flex: 1,

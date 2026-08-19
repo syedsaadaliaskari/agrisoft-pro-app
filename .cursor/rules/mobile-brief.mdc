@@ -23,6 +23,7 @@ Milestones 1–3: Expo Router + TypeScript, env, Supabase client (anon + RLS), H
 - Keep the same row ids as desktop (text/uuid).
 - Do not invent secrets. Ask for the anon key or use `.env`. Never commit `.env`.
 - If RLS hides rows from anon, add create-only SELECT policies (`docs/dev-rls.sql`). Do not drop tables. Do not use service_role.
+- Do not put setup notes, RLS/SQL, env keys, or tenant ids on shop screens. Keep those in `docs/` and the plan.
 - Do not build Super Admin, licenses, LAN sync, WhatsApp, or a full POS before customers work.
 
 ## Stack

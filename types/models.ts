@@ -52,6 +52,31 @@ export type SaleItem = {
   quantity: number | string | null;
   line_total: number | string | null;
   unit_price: number | string | null;
+  variant_id?: string | null;
+  size?: string | null;
+  color?: string | null;
+};
+
+export type PaymentMode = 'cash' | 'credit' | 'bank';
+
+export type CreateSaleLine = {
+  variantId: string;
+  productName: string;
+  size: string | null;
+  color: string | null;
+  quantity: number;
+  unitPrice: number;
+  costPrice: number;
+};
+
+export type SellableRow = {
+  variantId: string;
+  productId: string;
+  name: string;
+  detail: string;
+  stockQty: number;
+  salePrice: number;
+  costPrice: number;
 };
 
 export type Sale = {
@@ -64,5 +89,58 @@ export type Sale = {
   grand_total: number | string | null;
   paid_amount: number | string | null;
   status: string | null;
+  notes?: string | null;
   sale_items?: SaleItem[];
+};
+
+export type NamedRow = {
+  id: string;
+  name: string;
+  short_name?: string | null;
+  description?: string | null;
+  phone?: string | null;
+  city?: string | null;
+  is_active?: boolean | null;
+};
+
+export type Purchase = {
+  id: string;
+  invoice_no: string;
+  invoice_date: string;
+  vendor_id: string | null;
+  payment_mode: string | null;
+  grand_total: number | string | null;
+  status: string | null;
+};
+
+export type SaleReturn = {
+  id: string;
+  return_no: string;
+  return_date: string;
+  sale_id: string | null;
+  grand_total: number | string | null;
+};
+
+export type PurchaseReturn = {
+  id: string;
+  return_no: string;
+  return_date: string;
+  purchase_id: string | null;
+  grand_total: number | string | null;
+};
+
+export type AccountRow = {
+  id: string;
+  code: string;
+  name: string;
+  account_type: string;
+  opening_balance: number | string | null;
+};
+
+export type InventoryRow = {
+  variantId: string;
+  productId: string;
+  name: string;
+  detail: string;
+  stockQty: number;
 };

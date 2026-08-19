@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { StatusBanner } from '@/components/StatusBanner';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { cardRadius, cardShadow } from '@/constants/layout';
 import { fetchProduct, productStockQty } from '@/lib/api';
 import { displayOrDash, formatMoney, formatQty } from '@/lib/format';
 import type { Product } from '@/types/models';
@@ -58,14 +59,14 @@ export default function ProductDetailScreen() {
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.tint} />
         }>
-        {error ? <StatusBanner tone="error" title="Could not load product" detail={error} /> : null}
+        {error ? <StatusBanner tone="error" title="Couldn't load product" /> : null}
 
         {!loading && !error && !product ? (
-          <EmptyState title="Product not found" detail="It may have been removed, or it belongs to another shop." />
+          <EmptyState title="Product not found" />
         ) : null}
 
         {product ? (
-          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[styles.card, cardShadow, { backgroundColor: colors.card }]}>
             <Text style={[styles.name, { color: colors.text }]}>{product.name}</Text>
             <Text style={[styles.status, { color: product.is_active === false ? colors.warning : colors.tint }]}>
               {product.is_active === false ? 'Inactive' : 'Active'}
@@ -77,26 +78,22 @@ export default function ProductDetailScreen() {
           </View>
         ) : null}
 
-        {product ? (
-          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        {product && variants.length > 0 ? (
+          <View style={[styles.card, cardShadow, { backgroundColor: colors.card }]}>
             <Text style={[styles.heading, { color: colors.text }]}>Sizes</Text>
-            {variants.length === 0 ? (
-              <Text style={[styles.empty, { color: colors.muted }]}>No sizes on this product.</Text>
-            ) : (
-              variants.map((variant) => (
-                <View key={variant.id} style={[styles.variant, { borderBottomColor: colors.border }]}>
-                  <Text style={[styles.variantName, { color: colors.text }]}>
-                    {[variant.size, variant.color].filter(Boolean).join(' · ') || 'Default'}
-                  </Text>
-                  <Text style={[styles.variantMeta, { color: colors.muted }]}>
-                    Stock {formatQty(variant.stock_qty)}
-                    {variant.sale_price != null && variant.sale_price !== ''
-                      ? `  ·  ${formatMoney(variant.sale_price)}`
-                      : ''}
-                  </Text>
-                </View>
-              ))
-            )}
+            {variants.map((variant) => (
+              <View key={variant.id} style={[styles.variant, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.variantName, { color: colors.text }]}>
+                  {[variant.size, variant.color].filter(Boolean).join(' · ') || 'Default'}
+                </Text>
+                <Text style={[styles.variantMeta, { color: colors.muted }]}>
+                  Stock {formatQty(variant.stock_qty)}
+                  {variant.sale_price != null && variant.sale_price !== ''
+                    ? `  ·  ${formatMoney(variant.sale_price)}`
+                    : ''}
+                </Text>
+              </View>
+            ))}
           </View>
         ) : null}
       </ScrollView>
@@ -112,8 +109,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   card: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: cardRadius,
     padding: 16,
   },
   name: {

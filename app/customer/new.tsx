@@ -25,11 +25,7 @@ export default function NewCustomerScreen() {
       await createCustomer({ name, phone, city, address });
       router.back();
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Could not save this customer. If this is a permission error, run docs/dev-rls-write.sql.',
-      );
+      setError(err instanceof Error ? err.message : "Couldn't save this customer.");
     } finally {
       setSaving(false);
     }
@@ -42,7 +38,7 @@ export default function NewCustomerScreen() {
         style={[styles.screen, { backgroundColor: colors.background }]}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled">
-        {error ? <StatusBanner tone="error" title="Could not save" detail={error} /> : null}
+        {error ? <StatusBanner tone="error" title="Couldn't save" /> : null}
 
         <Text style={[styles.label, { color: colors.muted }]}>Name</Text>
         <TextInput
@@ -96,14 +92,14 @@ const styles = StyleSheet.create({
   input: {
     minHeight: 52,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 16,
     paddingHorizontal: 14,
     fontSize: 16,
   },
   button: {
     marginTop: 16,
     minHeight: 52,
-    borderRadius: 14,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },

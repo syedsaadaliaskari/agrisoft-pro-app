@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { StatusBanner } from '@/components/StatusBanner';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { cardRadius, cardShadow } from '@/constants/layout';
 import { fetchCustomer } from '@/lib/api';
 import { displayOrDash, formatMoney } from '@/lib/format';
 import type { Customer } from '@/types/models';
@@ -56,14 +57,14 @@ export default function CustomerDetailScreen() {
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.tint} />
         }>
-        {error ? <StatusBanner tone="error" title="Could not load customer" detail={error} /> : null}
+        {error ? <StatusBanner tone="error" title="Couldn't load customer" /> : null}
 
         {!loading && !error && !customer ? (
-          <EmptyState title="Customer not found" detail="It may have been removed, or it belongs to another shop." />
+          <EmptyState title="Customer not found" />
         ) : null}
 
         {customer ? (
-          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[styles.card, cardShadow, { backgroundColor: colors.card }]}>
             <Text style={[styles.name, { color: colors.text }]}>{customer.name}</Text>
             <Text style={[styles.status, { color: customer.is_active === false ? colors.warning : colors.tint }]}>
               {customer.is_active === false ? 'Inactive' : 'Active'}
@@ -93,8 +94,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   card: {
-    borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: cardRadius,
     padding: 16,
   },
   name: {
