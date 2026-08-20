@@ -7,6 +7,9 @@ import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { getSettings, saveSettings, subscribeErp } from '@/lib/erp';
+import { syncShopNow } from '@/lib/cloudSync';
+import { formatWhen } from '@/lib/format';
+import { getSyncStatus, subscribeSyncStatus } from '@/lib/syncStatus';
 import { isSuperAdminUser } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
 
@@ -15,7 +18,14 @@ export default function SettingsScreen() {
   const colors = Colors[scheme];
   const user = getSession();
   const [, tick] = useState(0);
-  useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
+  useEffect(() => {
+    const a = subscribeErp(() => tick((n) => n + 1));
+    const b = subscribeSyncStatus(() => tick((n) => n + 1));
+    return () => {
+      a();
+      b();
+    };
+  }, []);
   const current = getSettings();
   const [shop_name, setName] = useState(current.shop_name);
   const [shop_phone, setPhone] = useState(current.shop_phone);
@@ -24,6 +34,8 @@ export default function SettingsScreen() {
   const [tax_mode, setTax] = useState(current.tax_mode);
   const [receipt_footer, setFooter] = useState(current.receipt_footer);
   const [ok, setOk] = useState<string | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const sync = getSyncStatus();
 
   return (
     <ScreenGate permission="settings.manage">
@@ -35,6 +47,7 @@ export default function SettingsScreen() {
             </Text>
           </Card>
         ) : (
+          <>
           <Card title="Shop">
             <Field label="Shop name" value={shop_name} onChangeText={setName} />
             <Field label="Phone" value={shop_phone} onChangeText={setPhone} keyboardType="phone-pad" />
@@ -60,6 +73,33 @@ export default function SettingsScreen() {
             />
             <Text style={{ color: colors.muted }}>Signed in as {user?.fullName} ({user?.roleName})</Text>
           </Card>
+          <Card title="Cloud">
+            <Text style={{ color: colors.muted }}>
+              Last sync {formatWhen(sync.lastRefreshAt)}
+              {sync.customerCount != null ? ` · ${sync.customerCount} customers` : ''}
+              {sync.productCount != null ? ` · ${sync.productCount} products` : ''}
+              {sync.saleCount != null ? ` · ${sync.saleCount} sales` : ''}
+            </Text>
+            {sync.lastError ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{sync.lastError}</Text> : null}
+            <PrimaryButton
+              label={syncBusy ? 'Syncing…' : 'Sync now'}
+              color={colors.tint}
+              disabled={syncBusy}
+              onPress={async () => {
+                setSyncBusy(true);
+                setOk(null);
+                try {
+                  await syncShopNow();
+                  setOk('Cloud books updated.');
+                } catch (err) {
+                  setOk(err instanceof Error ? err.message : "Couldn't sync.");
+                } finally {
+                  setSyncBusy(false);
+                }
+              }}
+            />
+          </Card>
+          </>
         )}
       </ScrollView>
     </ScreenGate>
@@ -67,5 +107,5 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 16, paddingBottom: 40 },
+  content: { padding: 16, paddingBottom: 40, gap: 12 },
 });

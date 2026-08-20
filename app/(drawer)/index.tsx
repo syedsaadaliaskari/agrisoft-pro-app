@@ -8,6 +8,8 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
 import { dashboardSummary, money, subscribeErp } from '@/lib/erp';
+import { formatWhen } from '@/lib/format';
+import { getSyncStatus, subscribeSyncStatus } from '@/lib/syncStatus';
 import { isSuperAdminUser } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
 
@@ -26,14 +28,25 @@ function ShopHomeScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const [, tick] = useState(0);
-  useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
+  useEffect(() => {
+    const a = subscribeErp(() => tick((n) => n + 1));
+    const b = subscribeSyncStatus(() => tick((n) => n + 1));
+    return () => {
+      a();
+      b();
+    };
+  }, []);
   const dash = dashboardSummary();
+  const sync = getSyncStatus();
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const cardBase = [cardShadow, { backgroundColor: colors.card, borderRadius: cardRadius }];
 
   return (
     <ScreenGate permission="dashboard.view">
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.content}>
+        <Text style={{ color: colors.muted, fontWeight: '700' }}>
+          Cloud {sync.lastError ? sync.lastError : `synced ${formatWhen(sync.lastRefreshAt)}`}
+        </Text>
         <View style={[styles.analytics, cardBase]}>
           <Text style={[styles.metricName, { color: colors.muted }]}>Sales</Text>
           <Text style={[styles.metricValue, { color: colors.text }]}>{money(dash.monthSales)}</Text>

@@ -50,7 +50,13 @@ export default function RootLayout() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    void Promise.all([hydrateRbac(), hydrateVendor(), hydrateErp()]).then(() => {
+    void Promise.all([hydrateRbac(), hydrateVendor(), hydrateErp()]).then(async () => {
+      try {
+        const { hydrateCloudSync } = await import('@/lib/cloudSync');
+        await hydrateCloudSync();
+      } catch {
+        /* offline is fine */
+      }
       setReady(true);
       SplashScreen.hideAsync();
     });

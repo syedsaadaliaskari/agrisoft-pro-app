@@ -97,6 +97,7 @@ export type Account = {
 };
 
 export type DocLine = {
+  id: string;
   variantId: string;
   productName: string;
   size: string;
@@ -116,6 +117,7 @@ export type DocTotalsInput = {
 
 export type SaleDoc = {
   id: string;
+  voucherId: string | null;
   invoiceNo: string;
   invoiceDate: string;
   customerId: string | null;
@@ -135,6 +137,7 @@ export type SaleDoc = {
 
 export type PurchaseDoc = {
   id: string;
+  voucherId: string | null;
   invoiceNo: string;
   invoiceDate: string;
   vendorId: string | null;
@@ -154,6 +157,7 @@ export type PurchaseDoc = {
 
 export type ReturnDoc = {
   id: string;
+  voucherId: string | null;
   returnNo: string;
   returnDate: string;
   sourceId: string | null;
@@ -164,6 +168,7 @@ export type ReturnDoc = {
 };
 
 export type VoucherEntry = {
+  id: string;
   accountId: string;
   debit: number;
   credit: number;
@@ -220,6 +225,8 @@ type Store = {
   purchaseReturns: ReturnDoc[];
   vouchers: Voucher[];
   counters: Record<string, number>;
+  counterIds: Record<string, string>;
+  settingIds: Record<string, string>;
   audit: AuditRow[];
 };
 
@@ -321,6 +328,8 @@ function seed(): Store {
       vendor: 1,
       product: 1,
     },
+    counterIds: {},
+    settingIds: {},
     audit: [],
   };
 }
@@ -330,8 +339,16 @@ let store: Store = seed();
 function emit() {
   listeners.forEach((fn) => fn());
 }
+let persistHook: (() => void) | null = null;
+let skipPersistHook = false;
+
+export function setErpPersistHook(fn: (() => void) | null) {
+  persistHook = fn;
+}
+
 async function persist() {
   await AsyncStorage.setItem(KEY, JSON.stringify(store));
+  if (!skipPersistHook) persistHook?.();
 }
 function nextDoc(kind: string) {
   const n = store.counters[kind] ?? 1;
@@ -393,11 +410,12 @@ export function computeDocTotals(
   return { subtotal, discountAmount, additionAmount, taxAmount, grandTotal, paidAmount };
 }
 
-function makeLines(items: { variantId: string; quantity: number; unitPrice: number }[]): DocLine[] {
+function makeLines(items: { id?: string; variantId: string; quantity: number; unitPrice: number }[]): DocLine[] {
   return items.map((line) => {
     const found = findVariant(line.variantId);
     if (!found) throw new Error('Product not found.');
     return {
+      id: line.id || newId(),
       variantId: line.variantId,
       productName: found.product.name,
       size: found.variant.size,
@@ -475,18 +493,33 @@ function migrateStore() {
         ];
   }
   const fillDoc = (doc: SaleDoc | PurchaseDoc) => {
+    doc.voucherId = doc.voucherId ?? null;
     doc.subtotal = doc.subtotal ?? doc.grandTotal;
     doc.discountAmount = doc.discountAmount ?? 0;
     doc.additionAmount = doc.additionAmount ?? 0;
     doc.taxAmount = doc.taxAmount ?? 0;
     doc.paidAmount = doc.paidAmount ?? 0;
     for (const line of doc.items) {
+      line.id = line.id || newId();
       line.size = line.size ?? '';
       line.color = line.color ?? '';
     }
   };
   store.sales.forEach(fillDoc);
   store.purchases.forEach(fillDoc);
+  for (const row of store.saleReturns) {
+    row.voucherId = row.voucherId ?? null;
+    for (const line of row.items) line.id = line.id || newId();
+  }
+  for (const row of store.purchaseReturns) {
+    row.voucherId = row.voucherId ?? null;
+    for (const line of row.items) line.id = line.id || newId();
+  }
+  for (const voucher of store.vouchers) {
+    voucher.entries = voucher.entries.map((entry) => ({ ...entry, id: entry.id || newId() }));
+  }
+  store.counterIds = store.counterIds ?? {};
+  store.settingIds = store.settingIds ?? {};
   bumpCounter('sale', store.sales.map((row) => row.invoiceNo));
   bumpCounter('purchase', store.purchases.map((row) => row.invoiceNo));
   bumpCounter('sale_return', store.saleReturns.map((row) => row.returnNo));
@@ -801,7 +834,12 @@ export async function adjustStock(variantId: string, newQty: number) {
   emit();
 }
 
-function postVoucher(input: Omit<Voucher, 'id' | 'status' | 'voucherNo'> & { voucherNo?: string }) {
+function postVoucher(
+  input: Omit<Voucher, 'id' | 'status' | 'voucherNo' | 'entries'> & {
+    voucherNo?: string;
+    entries: Array<Omit<VoucherEntry, 'id'> & { id?: string }>;
+  },
+) {
   const row: Voucher = {
     id: newId(),
     voucherNo: input.voucherNo || nextDoc(input.voucherType),
@@ -814,7 +852,13 @@ function postVoucher(input: Omit<Voucher, 'id' | 'status' | 'voucherNo'> & { vou
     notes: input.notes,
     grandTotal: input.grandTotal,
     status: 'posted',
-    entries: input.entries,
+    entries: input.entries.map((entry) => ({
+      id: entry.id || newId(),
+      accountId: entry.accountId,
+      debit: entry.debit,
+      credit: entry.credit,
+      narration: entry.narration,
+    })),
   };
   store.vouchers.unshift(row);
   return row;
@@ -845,10 +889,28 @@ export async function createSale(input: {
   );
   const other = payAccount(input.paymentMode, '1300');
   const sales = accountByCode('4100');
+  const invoiceNo = nextDoc('sale');
+  const invoiceDate = input.invoiceDate || today();
+  const voucher = postVoucher({
+    voucherNo: invoiceNo,
+    voucherType: 'sale',
+    voucherDate: invoiceDate,
+    partyId: customer?.id ?? null,
+    partyName: customer?.name ?? 'Walk-in',
+    accountId: other.id,
+    referenceNo: invoiceNo,
+    notes: input.notes ?? '',
+    grandTotal: totals.grandTotal,
+    entries: [
+      { id: newId(), accountId: other.id, debit: totals.grandTotal, credit: 0, narration: invoiceNo },
+      { id: newId(), accountId: sales.id, debit: 0, credit: totals.grandTotal, narration: invoiceNo },
+    ],
+  });
   const doc: SaleDoc = {
     id: newId(),
-    invoiceNo: nextDoc('sale'),
-    invoiceDate: input.invoiceDate || today(),
+    voucherId: voucher.id,
+    invoiceNo,
+    invoiceDate,
     customerId: customer?.id ?? null,
     customerName: customer?.name ?? 'Walk-in',
     paymentMode: input.paymentMode,
@@ -859,21 +921,6 @@ export async function createSale(input: {
     deletedAt: null,
   };
   store.sales.unshift(doc);
-  postVoucher({
-    voucherNo: doc.invoiceNo,
-    voucherType: 'sale',
-    voucherDate: doc.invoiceDate,
-    partyId: doc.customerId,
-    partyName: doc.customerName,
-    accountId: other.id,
-    referenceNo: doc.invoiceNo,
-    notes: doc.notes,
-    grandTotal: totals.grandTotal,
-    entries: [
-      { accountId: other.id, debit: totals.grandTotal, credit: 0, narration: doc.invoiceNo },
-      { accountId: sales.id, debit: 0, credit: totals.grandTotal, narration: doc.invoiceNo },
-    ],
-  });
   audit('sales', 'create', doc.invoiceNo);
   await persist();
   emit();
@@ -913,7 +960,7 @@ export async function updateSale(
       items,
     });
     cancelLinkedVoucher('sale', sale.invoiceNo);
-    postVoucher({
+    const voucher = postVoucher({
       voucherNo: sale.invoiceNo,
       voucherType: 'sale',
       voucherDate: sale.invoiceDate,
@@ -924,10 +971,11 @@ export async function updateSale(
       notes: sale.notes,
       grandTotal: totals.grandTotal,
       entries: [
-        { accountId: other.id, debit: totals.grandTotal, credit: 0, narration: sale.invoiceNo },
-        { accountId: sales.id, debit: 0, credit: totals.grandTotal, narration: sale.invoiceNo },
+        { id: newId(), accountId: other.id, debit: totals.grandTotal, credit: 0, narration: sale.invoiceNo },
+        { id: newId(), accountId: sales.id, debit: 0, credit: totals.grandTotal, narration: sale.invoiceNo },
       ],
     });
+    sale.voucherId = voucher.id;
     audit('sales', 'update', sale.invoiceNo);
     await persist();
     emit();
@@ -955,10 +1003,28 @@ export async function createPurchase(input: {
   );
   const other = payAccount(input.paymentMode, '2100');
   const inventory = accountByCode('1400');
+  const invoiceNo = nextDoc('purchase');
+  const invoiceDate = input.invoiceDate || today();
+  const voucher = postVoucher({
+    voucherNo: invoiceNo,
+    voucherType: 'purchase',
+    voucherDate: invoiceDate,
+    partyId: vendor.id,
+    partyName: vendor.name,
+    accountId: other.id,
+    referenceNo: invoiceNo,
+    notes: input.notes ?? '',
+    grandTotal: totals.grandTotal,
+    entries: [
+      { id: newId(), accountId: inventory.id, debit: totals.grandTotal, credit: 0, narration: invoiceNo },
+      { id: newId(), accountId: other.id, debit: 0, credit: totals.grandTotal, narration: invoiceNo },
+    ],
+  });
   const doc: PurchaseDoc = {
     id: newId(),
-    invoiceNo: nextDoc('purchase'),
-    invoiceDate: input.invoiceDate || today(),
+    voucherId: voucher.id,
+    invoiceNo,
+    invoiceDate,
     vendorId: vendor.id,
     vendorName: vendor.name,
     paymentMode: input.paymentMode,
@@ -969,21 +1035,6 @@ export async function createPurchase(input: {
     deletedAt: null,
   };
   store.purchases.unshift(doc);
-  postVoucher({
-    voucherNo: doc.invoiceNo,
-    voucherType: 'purchase',
-    voucherDate: doc.invoiceDate,
-    partyId: vendor.id,
-    partyName: vendor.name,
-    accountId: other.id,
-    referenceNo: doc.invoiceNo,
-    notes: doc.notes,
-    grandTotal: totals.grandTotal,
-    entries: [
-      { accountId: inventory.id, debit: totals.grandTotal, credit: 0, narration: doc.invoiceNo },
-      { accountId: other.id, debit: 0, credit: totals.grandTotal, narration: doc.invoiceNo },
-    ],
-  });
   audit('purchases', 'create', doc.invoiceNo);
   await persist();
   emit();
@@ -1024,7 +1075,7 @@ export async function updatePurchase(
       items,
     });
     cancelLinkedVoucher('purchase', purchase.invoiceNo);
-    postVoucher({
+    const voucher = postVoucher({
       voucherNo: purchase.invoiceNo,
       voucherType: 'purchase',
       voucherDate: purchase.invoiceDate,
@@ -1039,6 +1090,7 @@ export async function updatePurchase(
         { accountId: other.id, debit: 0, credit: totals.grandTotal, narration: purchase.invoiceNo },
       ],
     });
+    purchase.voucherId = voucher.id;
     audit('purchases', 'update', purchase.invoiceNo);
     await persist();
     emit();
@@ -1057,6 +1109,7 @@ export async function createSaleReturn(input: { saleId: string; items: { variant
     if (!orig) throw new Error('Item was not on that sale.');
     bumpStock(line.variantId, line.quantity);
     return {
+      id: newId(),
       variantId: line.variantId,
       productName: orig.productName,
       size: orig.size,
@@ -1067,10 +1120,30 @@ export async function createSaleReturn(input: { saleId: string; items: { variant
     };
   });
   const grandTotal = items.reduce((s, l) => s + l.lineTotal, 0);
+  const sales = accountByCode('4100');
+  const recv = payAccount(sale.paymentMode, '1300');
+  const returnNo = nextDoc('sale_return');
+  const returnDate = today();
+  const voucher = postVoucher({
+    voucherNo: returnNo,
+    voucherType: 'sale_return',
+    voucherDate: returnDate,
+    partyId: sale.customerId,
+    partyName: sale.customerName,
+    accountId: recv.id,
+    referenceNo: returnNo,
+    notes: sale.invoiceNo,
+    grandTotal,
+    entries: [
+      { accountId: sales.id, debit: grandTotal, credit: 0, narration: returnNo },
+      { accountId: recv.id, debit: 0, credit: grandTotal, narration: returnNo },
+    ],
+  });
   const doc: ReturnDoc = {
     id: newId(),
-    returnNo: nextDoc('sale_return'),
-    returnDate: today(),
+    voucherId: voucher.id,
+    returnNo,
+    returnDate,
     sourceId: sale.id,
     partyName: sale.customerName,
     grandTotal,
@@ -1078,23 +1151,6 @@ export async function createSaleReturn(input: { saleId: string; items: { variant
     items,
   };
   store.saleReturns.unshift(doc);
-  const sales = accountByCode('4100');
-  const recv = payAccount(sale.paymentMode, '1300');
-  postVoucher({
-    voucherNo: doc.returnNo,
-    voucherType: 'sale_return',
-    voucherDate: doc.returnDate,
-    partyId: sale.customerId,
-    partyName: sale.customerName,
-    accountId: recv.id,
-    referenceNo: doc.returnNo,
-    notes: sale.invoiceNo,
-    grandTotal,
-    entries: [
-      { accountId: sales.id, debit: grandTotal, credit: 0, narration: doc.returnNo },
-      { accountId: recv.id, debit: 0, credit: grandTotal, narration: doc.returnNo },
-    ],
-  });
   audit('sales', 'return', doc.returnNo);
   await persist();
   emit();
@@ -1109,6 +1165,7 @@ export async function createPurchaseReturn(input: { purchaseId: string; items: {
     if (!orig) throw new Error('Item was not on that bill.');
     bumpStock(line.variantId, -line.quantity);
     return {
+      id: newId(),
       variantId: line.variantId,
       productName: orig.productName,
       size: orig.size,
@@ -1119,10 +1176,30 @@ export async function createPurchaseReturn(input: { purchaseId: string; items: {
     };
   });
   const grandTotal = items.reduce((s, l) => s + l.lineTotal, 0);
+  const inventory = accountByCode('1400');
+  const pay = payAccount(purchase.paymentMode, '2100');
+  const returnNo = nextDoc('purchase_return');
+  const returnDate = today();
+  const voucher = postVoucher({
+    voucherNo: returnNo,
+    voucherType: 'purchase_return',
+    voucherDate: returnDate,
+    partyId: purchase.vendorId,
+    partyName: purchase.vendorName,
+    accountId: pay.id,
+    referenceNo: returnNo,
+    notes: purchase.invoiceNo,
+    grandTotal,
+    entries: [
+      { accountId: pay.id, debit: grandTotal, credit: 0, narration: returnNo },
+      { accountId: inventory.id, debit: 0, credit: grandTotal, narration: returnNo },
+    ],
+  });
   const doc: ReturnDoc = {
     id: newId(),
-    returnNo: nextDoc('purchase_return'),
-    returnDate: today(),
+    voucherId: voucher.id,
+    returnNo,
+    returnDate,
     sourceId: purchase.id,
     partyName: purchase.vendorName,
     grandTotal,
@@ -1130,23 +1207,6 @@ export async function createPurchaseReturn(input: { purchaseId: string; items: {
     items,
   };
   store.purchaseReturns.unshift(doc);
-  const inventory = accountByCode('1400');
-  const pay = payAccount(purchase.paymentMode, '2100');
-  postVoucher({
-    voucherNo: doc.returnNo,
-    voucherType: 'purchase_return',
-    voucherDate: doc.returnDate,
-    partyId: purchase.vendorId,
-    partyName: purchase.vendorName,
-    accountId: pay.id,
-    referenceNo: doc.returnNo,
-    notes: purchase.invoiceNo,
-    grandTotal,
-    entries: [
-      { accountId: pay.id, debit: grandTotal, credit: 0, narration: doc.returnNo },
-      { accountId: inventory.id, debit: 0, credit: grandTotal, narration: doc.returnNo },
-    ],
-  });
   audit('purchases', 'return', doc.returnNo);
   await persist();
   emit();
@@ -1477,6 +1537,60 @@ export function dashboardSummary() {
     lowStockCount: inv.filter((r) => r.isLow).length,
     points,
   };
+}
+
+export function getShopSnapshot() {
+  return store;
+}
+
+export async function applyCloudSnapshot(patch: {
+  settings?: Partial<ShopSettings>;
+  settingIds?: Record<string, string>;
+  units?: Named[];
+  categories?: Named[];
+  taxes?: Named[];
+  discounts?: Named[];
+  additions?: Named[];
+  customers?: Party[];
+  vendors?: Party[];
+  products?: Product[];
+  accounts?: Account[];
+  sales?: SaleDoc[];
+  purchases?: PurchaseDoc[];
+  saleReturns?: ReturnDoc[];
+  purchaseReturns?: ReturnDoc[];
+  vouchers?: Voucher[];
+  counters?: Record<string, number>;
+  counterIds?: Record<string, string>;
+  audit?: AuditRow[];
+}) {
+  skipPersistHook = true;
+  try {
+    if (patch.settings) store.settings = { ...store.settings, ...patch.settings };
+    if (patch.settingIds) store.settingIds = patch.settingIds;
+    if (patch.units) store.units = patch.units;
+    if (patch.categories) store.categories = patch.categories;
+    if (patch.taxes) store.taxes = patch.taxes;
+    if (patch.discounts) store.discounts = patch.discounts;
+    if (patch.additions) store.additions = patch.additions;
+    if (patch.customers) store.customers = patch.customers;
+    if (patch.vendors) store.vendors = patch.vendors;
+    if (patch.products) store.products = patch.products;
+    if (patch.accounts?.length) store.accounts = patch.accounts;
+    if (patch.sales) store.sales = patch.sales;
+    if (patch.purchases) store.purchases = patch.purchases;
+    if (patch.saleReturns) store.saleReturns = patch.saleReturns;
+    if (patch.purchaseReturns) store.purchaseReturns = patch.purchaseReturns;
+    if (patch.vouchers) store.vouchers = patch.vouchers;
+    if (patch.counters) store.counters = { ...store.counters, ...patch.counters };
+    if (patch.counterIds) store.counterIds = patch.counterIds;
+    if (patch.audit) store.audit = patch.audit;
+    migrateStore();
+    await persist();
+    emit();
+  } finally {
+    skipPersistHook = false;
+  }
 }
 
 export function exportShopJson() {
