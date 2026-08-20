@@ -1,4 +1,4 @@
-import { ReportBody } from '@/components/ReportBody';
+import { ShopReport } from '@/components/ShopReport';
 export default function Screen() {
-  return <ReportBody kind="tax" />;
+  return <ShopReport kind="tax" />;
 }

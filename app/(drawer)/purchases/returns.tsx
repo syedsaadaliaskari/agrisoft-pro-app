@@ -1,35 +1,28 @@
-import { useCallback, useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { Href, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ActionBar } from '@/components/ActionBar';
 import { EmptyState } from '@/components/EmptyState';
 import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
-import { formatMoney } from '@/lib/format';
-import { fetchPurchaseReturns } from '@/lib/shopData';
-import type { PurchaseReturn } from '@/types/models';
+import { listPurchaseReturns, listPurchases, money, subscribeErp } from '@/lib/erp';
+import { askPrint } from '@/lib/exportShare';
+import { printHtml, returnPrintHtml } from '@/lib/print';
+import { hasPermission } from '@/lib/permissions';
+import { getSession } from '@/lib/rbac';
 
 export default function PurchaseReturnsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
-  const [rows, setRows] = useState<PurchaseReturn[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setRows(await fetchPurchaseReturns());
-    } catch {
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const router = useRouter();
+  const [, tick] = useState(0);
+  useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
+  const rows = listPurchaseReturns();
+  const bills = listPurchases().filter((s) => s.status === 'posted');
+  const can = hasPermission(getSession(), 'purchases.return');
 
   return (
     <ScreenGate permission="purchases.return">
@@ -37,17 +30,39 @@ export default function PurchaseReturnsScreen() {
         <FlatList
           data={rows}
           keyExtractor={(item) => item.id}
-          refreshing={loading}
-          onRefresh={() => void load()}
           contentContainerStyle={styles.list}
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          ListEmptyComponent={loading ? null : <EmptyState title="No purchase returns" />}
+          ListHeaderComponent={
+            can ? (
+              <View style={{ gap: 8, marginBottom: 12 }}>
+                <Text style={{ color: colors.muted, fontWeight: '700' }}>Return against a purchase</Text>
+                {bills.slice(0, 20).map((bill) => (
+                  <Pressable
+                    key={bill.id}
+                    onPress={() => router.push(`/return/purchase/${bill.id}` as Href)}
+                    style={[styles.row, { backgroundColor: colors.tintSoft }]}>
+                    <Text style={{ color: colors.text, fontWeight: '700' }}>
+                      {bill.invoiceNo} · {bill.vendorName}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={rows.length ? null : <EmptyState title="No purchase returns" />}
           renderItem={({ item }) => (
             <View style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
-              <Text style={[styles.name, { color: colors.text }]}>{item.return_no}</Text>
-              <Text style={[styles.meta, { color: colors.muted }]}>
-                {item.return_date}  ·  {formatMoney(item.grand_total)}
+              <Text style={{ color: colors.text, fontWeight: '800' }}>{item.returnNo}</Text>
+              <Text style={{ color: colors.muted }}>
+                {item.returnDate} · {item.partyName} · {money(item.grandTotal)}
               </Text>
+              <ActionBar
+                actions={[
+                  {
+                    label: 'Print',
+                    onPress: () => askPrint((size) => void printHtml(returnPrintHtml(item, 'purchase', size), item.returnNo)),
+                  },
+                ]}
+              />
             </View>
           )}
         />
@@ -58,8 +73,6 @@ export default function PurchaseReturnsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  list: { padding: 16 },
-  row: { borderRadius: cardRadius, padding: 16, minHeight: 64, justifyContent: 'center' },
-  name: { fontSize: 16, fontWeight: '700' },
-  meta: { marginTop: 4, fontSize: 13 },
+  list: { padding: 16, paddingBottom: 40 },
+  row: { borderRadius: cardRadius, padding: 14, gap: 4, marginBottom: 8 },
 });

@@ -1,5 +1,5 @@
 import { NamedMaster } from '@/components/NamedMaster';
-import { createUnit, fetchUnits } from '@/lib/shopData';
+import { listUnits, upsertNamed } from '@/lib/erp';
 
 export default function UnitsScreen() {
   return (
@@ -7,8 +7,8 @@ export default function UnitsScreen() {
       permission="products.view"
       managePermission="products.manage"
       title="Unit"
-      load={fetchUnits}
-      onCreate={(name) => createUnit(name, name.slice(0, 6))}
+      load={async () => listUnits().map((r) => ({ id: r.id, name: r.name, short_name: r.shortName, is_active: r.isActive }))}
+      onCreate={(name) => upsertNamed('units', { name, shortName: name.slice(0, 6) })}
       subtitle={(row) => row.short_name || ''}
     />
   );

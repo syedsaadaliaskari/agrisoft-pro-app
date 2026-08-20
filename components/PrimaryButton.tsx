@@ -7,7 +7,7 @@ type Props = PressableProps & {
   textColor?: string;
 };
 
-export function PrimaryButton({ label, tone = 'primary', color, textColor, disabled, style, ...rest }: Props) {
+export function PrimaryButton({ label, tone = 'primary', color, textColor, disabled, style: _style, ...rest }: Props) {
   return (
     <Pressable
       disabled={disabled}
@@ -15,7 +15,6 @@ export function PrimaryButton({ label, tone = 'primary', color, textColor, disab
         styles.btn,
         tone === 'primary' ? { backgroundColor: color } : { backgroundColor: 'transparent', borderWidth: 1, borderColor: color },
         { opacity: disabled ? 0.45 : pressed ? 0.82 : 1 },
-        style,
       ]}
       {...rest}>
       <Text style={[styles.label, { color: tone === 'primary' ? textColor ?? '#fff' : color }]}>{label}</Text>

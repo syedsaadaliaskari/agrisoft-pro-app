@@ -1,5 +1,5 @@
 import { NamedMaster } from '@/components/NamedMaster';
-import { createCategory, fetchCategories } from '@/lib/shopData';
+import { listCategories, upsertNamed } from '@/lib/erp';
 
 export default function CategoriesScreen() {
   return (
@@ -7,8 +7,8 @@ export default function CategoriesScreen() {
       permission="products.view"
       managePermission="products.manage"
       title="Category"
-      load={fetchCategories}
-      onCreate={createCategory}
+      load={async () => listCategories().map((r) => ({ id: r.id, name: r.name, is_active: r.isActive }))}
+      onCreate={(name) => upsertNamed('categories', { name })}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { LedgerList } from '@/components/LedgerList';
+import { LedgerInquiry } from '@/components/LedgerInquiry';
 export default function Screen() {
-  return <LedgerList kind="expenses" />;
+  return <LedgerInquiry kind="expenses" />;
 }

@@ -1,79 +1,92 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, Share, Text, View } from 'react-native';
+import { Href, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
-import { EmptyState } from '@/components/EmptyState';
-import { StatusBanner } from '@/components/StatusBanner';
+import { ActionBar } from '@/components/ActionBar';
+import { Card } from '@/components/FormKit';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { cardRadius, cardShadow } from '@/constants/layout';
-import { fetchSale } from '@/lib/api';
-import { displayOrDash, formatMoney, formatQty } from '@/lib/format';
-import type { Sale } from '@/types/models';
+import { cancelSale, getSale, money } from '@/lib/erp';
+import { askPrint } from '@/lib/exportShare';
+import { printHtml, salePrintHtml, saleReceiptText } from '@/lib/print';
+import { hasPermission } from '@/lib/permissions';
+import { getSession } from '@/lib/rbac';
 
-export default function SaleDetailScreen() {
+export default function SaleDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
-  const [sale, setSale] = useState<Sale | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    setError(null);
-    try {
-      setSale(await fetchSale(id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load this sale.');
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const router = useRouter();
+  const sale = getSale(id);
+  const canCreate = hasPermission(getSession(), 'sales.create');
 
   return (
     <>
-      <Stack.Screen options={{ title: sale?.invoice_no ?? 'Sale' }} />
-      <ScrollView
-        style={[styles.screen, { backgroundColor: colors.background }]}
-        contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.tint} />}>
-        {error ? <StatusBanner tone="error" title="Couldn't load sale" /> : null}
-        {!loading && !error && !sale ? <EmptyState title="Sale not found" /> : null}
-        {sale ? (
-          <View style={[styles.card, cardShadow, { backgroundColor: colors.card }]}>
-            <Text style={[styles.name, { color: colors.text }]}>{sale.invoice_no}</Text>
-            <Text style={[styles.meta, { color: colors.muted }]}>
-              {sale.invoice_date}  ·  {displayOrDash(sale.payment_mode)}
+      <Stack.Screen options={{ title: sale?.invoiceNo ?? 'Sale' }} />
+      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}>
+        {!sale ? (
+          <Text style={{ color: colors.muted }}>Sale not found.</Text>
+        ) : (
+          <Card title={sale.invoiceNo}>
+            <Text style={{ color: colors.muted }}>
+              {sale.invoiceDate} · {sale.customerName} · {sale.paymentMode} · {sale.status}
             </Text>
-            <Text style={[styles.total, { color: colors.text }]}>{formatMoney(sale.grand_total)}</Text>
-            {(sale.sale_items ?? []).map((item) => (
-              <View key={item.id} style={[styles.line, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.lineName, { color: colors.text }]}>{item.product_name}</Text>
-                <Text style={[styles.meta, { color: colors.muted }]}>
-                  {formatQty(item.quantity)}  ·  {formatMoney(item.line_total)}
+            {sale.items.map((line) => (
+              <View key={line.variantId} style={{ paddingVertical: 8 }}>
+                <Text style={{ color: colors.text, fontWeight: '700' }}>{line.productName}</Text>
+                <Text style={{ color: colors.muted }}>
+                  {[line.size, line.color].filter(Boolean).join(' / ')}
+                  {line.size || line.color ? ' · ' : ''}
+                  {line.quantity} × {money(line.unitPrice)} = {money(line.lineTotal)}
                 </Text>
               </View>
             ))}
-          </View>
-        ) : null}
+            <Text style={{ color: colors.muted }}>Subtotal {money(sale.subtotal)}</Text>
+            <Text style={{ color: colors.muted }}>Discount {money(sale.discountAmount)}</Text>
+            <Text style={{ color: colors.muted }}>Additions {money(sale.additionAmount)}</Text>
+            <Text style={{ color: colors.muted }}>Tax {money(sale.taxAmount)}</Text>
+            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>Total {money(sale.grandTotal)}</Text>
+            <Text style={{ color: colors.muted }}>Paid {money(sale.paidAmount)}</Text>
+            <Text style={{ color: colors.muted }}>Balance {money(sale.grandTotal - sale.paidAmount)}</Text>
+            {sale.notes ? <Text style={{ color: colors.text }}>{sale.notes}</Text> : null}
+            <ActionBar
+              actions={[
+                {
+                  label: 'Edit',
+                  hidden: !canCreate || sale.status !== 'posted',
+                  onPress: () => router.push(`/sale/edit/${sale.id}` as Href),
+                },
+                {
+                  label: 'Print',
+                  onPress: () =>
+                    askPrint((size) => {
+                      if (size === 'thermal') void Share.share({ message: saleReceiptText(sale) });
+                      else void printHtml(salePrintHtml(sale, size), sale.invoiceNo);
+                    }),
+                },
+                {
+                  label: 'Sale return',
+                  hidden: sale.status !== 'posted' || !hasPermission(getSession(), 'sales.return'),
+                  onPress: () => router.push(`/return/sale/${sale.id}` as Href),
+                },
+                {
+                  label: 'Delete',
+                  danger: true,
+                  hidden: !canCreate || sale.status !== 'posted',
+                  onPress: () =>
+                    Alert.alert('Delete sale', sale.invoiceNo, [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => void cancelSale(sale.id).then(() => router.back()),
+                      },
+                    ]),
+                },
+              ]}
+            />
+          </Card>
+        )}
       </ScrollView>
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  content: { padding: 16, paddingBottom: 40 },
-  card: { borderRadius: cardRadius, padding: 16 },
-  name: { fontSize: 22, fontWeight: '700' },
-  meta: { fontSize: 14, marginTop: 4 },
-  total: { fontSize: 28, fontWeight: '800', marginVertical: 12 },
-  line: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  lineName: { fontSize: 16, fontWeight: '600' },
-});

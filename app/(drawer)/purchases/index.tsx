@@ -1,53 +1,109 @@
-import { useCallback, useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { Href, useRouter } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ActionBar } from '@/components/ActionBar';
 import { EmptyState } from '@/components/EmptyState';
 import { ScreenGate } from '@/components/ScreenGate';
+import { SearchBar } from '@/components/SearchBar';
+import { PrimaryButton } from '@/components/PrimaryButton';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
-import { formatMoney } from '@/lib/format';
-import { fetchPurchases } from '@/lib/shopData';
-import type { Purchase } from '@/types/models';
+import { cancelPurchase, listPurchases, money, subscribeErp } from '@/lib/erp';
+import { askExport, askPrint } from '@/lib/exportShare';
+import { printHtml, purchasePrintHtml } from '@/lib/print';
+import { hasPermission } from '@/lib/permissions';
+import { getSession } from '@/lib/rbac';
 
 export default function PurchasesScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
-  const [rows, setRows] = useState<Purchase[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setRows(await fetchPurchases());
-    } catch {
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const router = useRouter();
+  const [, tick] = useState(0);
+  useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
+  const [query, setQuery] = useState('');
+  const canCreate = hasPermission(getSession(), 'purchases.create');
+  const rows = listPurchases();
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => `${r.invoiceNo} ${r.vendorName} ${r.paymentMode}`.toLowerCase().includes(q));
+  }, [query, rows]);
 
   return (
     <ScreenGate permission="purchases.view">
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
+        <View style={{ padding: 16, gap: 10, paddingBottom: 0 }}>
+          <SearchBar value={query} onChangeText={setQuery} placeholder="Search bill, vendor" />
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {canCreate ? (
+              <View style={{ flex: 1 }}>
+                <PrimaryButton label="New purchase" color={colors.tint} onPress={() => router.push('/purchase/new' as Href)} />
+              </View>
+            ) : null}
+            <View style={{ flex: 1 }}>
+              <PrimaryButton
+                label="Export"
+                tone="ghost"
+                color={colors.tint}
+                onPress={() =>
+                  askExport({
+                    filename: 'purchases',
+                    title: 'Purchases',
+                    columns: [
+                      { key: 'invoiceNo', label: 'Invoice' },
+                      { key: 'invoiceDate', label: 'Date' },
+                      { key: 'vendorName', label: 'Vendor' },
+                      { key: 'paymentMode', label: 'Payment' },
+                      { key: 'grandTotal', label: 'Total' },
+                      { key: 'paidAmount', label: 'Paid' },
+                    ],
+                    rows: visible,
+                  })
+                }
+              />
+            </View>
+          </View>
+        </View>
         <FlatList
-          data={rows}
+          data={visible}
           keyExtractor={(item) => item.id}
-          refreshing={loading}
-          onRefresh={() => void load()}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          ListEmptyComponent={loading ? null : <EmptyState title="No purchases" />}
+          ListEmptyComponent={<EmptyState title="No purchases" />}
           renderItem={({ item }) => (
             <View style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
-              <Text style={[styles.name, { color: colors.text }]}>{item.invoice_no}</Text>
-              <Text style={[styles.meta, { color: colors.muted }]}>
-                {item.invoice_date}  ·  {item.payment_mode}  ·  {formatMoney(item.grand_total)}
-              </Text>
+              <Pressable onPress={() => router.push(`/purchase/${item.id}` as Href)}>
+                <Text style={[styles.name, { color: colors.text }]}>{item.invoiceNo}</Text>
+                <Text style={{ color: colors.muted }}>
+                  {item.invoiceDate} · {item.vendorName} · {item.paymentMode} · {money(item.grandTotal)}
+                </Text>
+              </Pressable>
+              <ActionBar
+                actions={[
+                  { label: 'View', onPress: () => router.push(`/purchase/${item.id}` as Href) },
+                  {
+                    label: 'Edit',
+                    hidden: !canCreate || item.status !== 'posted',
+                    onPress: () => router.push(`/purchase/edit/${item.id}` as Href),
+                  },
+                  {
+                    label: 'Print',
+                    onPress: () => askPrint((size) => void printHtml(purchasePrintHtml(item, size), item.invoiceNo)),
+                  },
+                  {
+                    label: 'Delete',
+                    danger: true,
+                    hidden: !canCreate || item.status !== 'posted',
+                    onPress: () =>
+                      Alert.alert('Delete purchase', item.invoiceNo, [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: () => void cancelPurchase(item.id) },
+                      ]),
+                  },
+                ]}
+              />
             </View>
           )}
         />
@@ -58,8 +114,7 @@ export default function PurchasesScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  list: { padding: 16 },
-  row: { borderRadius: cardRadius, padding: 16, minHeight: 64, justifyContent: 'center' },
-  name: { fontSize: 16, fontWeight: '700' },
-  meta: { marginTop: 4, fontSize: 13 },
+  list: { padding: 16, paddingBottom: 40 },
+  row: { borderRadius: cardRadius, padding: 14, gap: 10 },
+  name: { fontSize: 16, fontWeight: '800' },
 });

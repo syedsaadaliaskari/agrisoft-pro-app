@@ -131,6 +131,22 @@ async function ensureVendorRbac(): Promise<void> {
       changed = true;
     }
   }
+  const cashierRole = store.roles.find((role) => role.name === 'Cashier');
+  if (cashierRole) {
+    const missing = [...CASHIER_CODES].filter((code) => !cashierRole.permissionCodes.includes(code));
+    if (missing.length) {
+      cashierRole.permissionCodes = [...cashierRole.permissionCodes, ...missing];
+      changed = true;
+    }
+  }
+  const accountantRole = store.roles.find((role) => role.name === 'Accountant');
+  if (accountantRole) {
+    const missing = [...ACCOUNTANT_CODES].filter((code) => !accountantRole.permissionCodes.includes(code));
+    if (missing.length) {
+      accountantRole.permissionCodes = [...accountantRole.permissionCodes, ...missing];
+      changed = true;
+    }
+  }
   const superRole = store.roles.find((role) => role.name === 'Super Admin');
   const adminUser = store.users.find((user) => user.username === 'admin');
   if (superRole && adminUser && adminUser.roleId !== superRole.id) {
@@ -145,6 +161,17 @@ async function ensureVendorRbac(): Promise<void> {
       passwordHash: await bcrypt.hash('admin123', 10),
       fullName: 'Super Admin',
       roleId: superRole.id,
+      isActive: true,
+    });
+    changed = true;
+  }
+  if (adminRole && !store.users.some((user) => user.username === 'shop')) {
+    store.users.push({
+      id: newId(),
+      username: 'shop',
+      passwordHash: await bcrypt.hash('admin123', 10),
+      fullName: 'Shop Administrator',
+      roleId: adminRole.id,
       isActive: true,
     });
     changed = true;

@@ -20,7 +20,7 @@ export default function DrawerLayout() {
 
   return (
     <Drawer
-      drawerContent={(props) => <ShopDrawerContent {...props} />}
+      drawerContent={(props) => <ShopDrawerContent {...props}>{null}</ShopDrawerContent>}
       screenOptions={{
         headerStyle: { backgroundColor: colors.header },
         headerTintColor: colors.text,
@@ -40,6 +40,11 @@ export default function DrawerLayout() {
       <Drawer.Screen name="catalog/categories" options={{ title: 'Categories' }} />
       <Drawer.Screen name="catalog/products" options={{ title: 'Products' }} />
       <Drawer.Screen name="catalog/inventory" options={{ title: 'Inventory' }} />
+      <Drawer.Screen name="transactions/journal" options={{ title: 'Journal' }} />
+      <Drawer.Screen name="transactions/receive" options={{ title: 'Receive payment' }} />
+      <Drawer.Screen name="transactions/pay" options={{ title: 'Make payment' }} />
+      <Drawer.Screen name="transactions/expense" options={{ title: 'Expense' }} />
+      <Drawer.Screen name="transactions/income" options={{ title: 'Income' }} />
       <Drawer.Screen name="ledgers/accounts" options={{ title: 'Accounts ledger' }} />
       <Drawer.Screen name="ledgers/customers" options={{ title: 'Customer ledger' }} />
       <Drawer.Screen name="ledgers/vendors" options={{ title: 'Vendor ledger' }} />
@@ -51,11 +56,16 @@ export default function DrawerLayout() {
       <Drawer.Screen name="reports/stock" options={{ title: 'Stock report' }} />
       <Drawer.Screen name="reports/tax" options={{ title: 'Tax report' }} />
       <Drawer.Screen name="reports/deleted" options={{ title: 'Deleted' }} />
+      <Drawer.Screen name="setup/taxes" options={{ title: 'Taxes' }} />
+      <Drawer.Screen name="setup/discounts" options={{ title: 'Discounts' }} />
+      <Drawer.Screen name="setup/additions" options={{ title: 'Additions' }} />
       <Drawer.Screen name="platform/licenses" options={{ title: 'Activated list' }} />
       <Drawer.Screen name="settings/index" options={{ title: 'Settings' }} />
       <Drawer.Screen name="settings/license" options={{ title: 'License' }} />
       <Drawer.Screen name="settings/users" options={{ title: 'Users & roles' }} />
       <Drawer.Screen name="settings/password" options={{ title: 'Update password' }} />
+      <Drawer.Screen name="settings/backup" options={{ title: 'Backup' }} />
+      <Drawer.Screen name="settings/audit" options={{ title: 'Audit' }} />
     </Drawer>
   );
 }

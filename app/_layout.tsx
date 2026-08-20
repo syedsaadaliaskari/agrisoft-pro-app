@@ -7,6 +7,7 @@ import 'react-native-reanimated';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { hydrateErp } from '@/lib/erp';
 import { hydrateRbac } from '@/lib/rbac';
 import { hydrateVendor } from '@/lib/vendor';
 
@@ -49,7 +50,7 @@ export default function RootLayout() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    void Promise.all([hydrateRbac(), hydrateVendor()]).then(() => {
+    void Promise.all([hydrateRbac(), hydrateVendor(), hydrateErp()]).then(() => {
       setReady(true);
       SplashScreen.hideAsync();
     });
@@ -70,6 +71,13 @@ export default function RootLayout() {
           <Stack.Screen name="product/new" options={{ title: 'New product', headerBackTitle: 'Back' }} />
           <Stack.Screen name="sale/new" options={{ title: 'New sale', headerBackTitle: 'Back' }} />
           <Stack.Screen name="sale/[id]" options={{ title: 'Sale', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="sale/edit/[id]" options={{ title: 'Edit sale', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="purchase/new" options={{ title: 'New purchase', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="purchase/[id]" options={{ title: 'Purchase', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="purchase/edit/[id]" options={{ title: 'Edit purchase', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="vendor/new" options={{ title: 'New vendor', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="vendor/[id]" options={{ title: 'Vendor', headerBackTitle: 'Back' }} />
+          <Stack.Screen name="return/[kind]/[id]" options={{ title: 'Return', headerBackTitle: 'Back' }} />
         </Stack>
       </ThemeProvider>
     </GestureHandlerRootView>

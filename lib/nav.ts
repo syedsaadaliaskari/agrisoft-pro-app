@@ -66,6 +66,17 @@ export const shopNavigation: NavGroup[] = [
     ],
   },
   {
+    title: 'Transactions',
+    icon: 'swap-vertical-outline',
+    items: [
+      { label: 'Journal', href: '/transactions/journal', icon: 'book-outline', permission: 'transactions.view', audience: 'shop' },
+      { label: 'Receive payment', href: '/transactions/receive', icon: 'arrow-down-outline', permission: 'transactions.view', audience: 'shop' },
+      { label: 'Make payment', href: '/transactions/pay', icon: 'arrow-up-outline', permission: 'transactions.view', audience: 'shop' },
+      { label: 'Expense', href: '/transactions/expense', icon: 'wallet-outline', permission: 'transactions.view', audience: 'shop' },
+      { label: 'Income', href: '/transactions/income', icon: 'trending-up-outline', permission: 'transactions.view', audience: 'shop' },
+    ],
+  },
+  {
     title: 'Ledgers',
     icon: 'book-outline',
     items: [
@@ -92,6 +103,9 @@ export const shopNavigation: NavGroup[] = [
     title: 'Settings',
     icon: 'settings-outline',
     items: [
+      { label: 'Taxes', href: '/setup/taxes', icon: 'pricetag-outline', permission: 'settings.manage', audience: 'shop' },
+      { label: 'Discounts', href: '/setup/discounts', icon: 'remove-circle-outline', permission: 'settings.manage', audience: 'shop' },
+      { label: 'Additions', href: '/setup/additions', icon: 'add-circle-outline', permission: 'settings.manage', audience: 'shop' },
       {
         label: 'License',
         href: '/settings/license',
@@ -101,6 +115,8 @@ export const shopNavigation: NavGroup[] = [
       },
       { label: 'Users & roles', href: '/settings/users', icon: 'shield-checkmark-outline', permission: 'users.manage', audience: 'both' },
       { label: 'Update password', href: '/settings/password', icon: 'lock-closed-outline', audience: 'both' },
+      { label: 'Backup', href: '/settings/backup', icon: 'cloud-upload-outline', permission: 'settings.manage', audience: 'both' },
+      { label: 'Audit', href: '/settings/audit', icon: 'list-outline', permission: 'settings.manage', audience: 'both' },
       { label: 'Settings', href: '/settings', icon: 'settings-outline', permission: 'settings.manage', audience: 'platform' },
       { label: 'Shop', href: '/settings', icon: 'settings-outline', permission: 'settings.manage', audience: 'shop' },
     ],

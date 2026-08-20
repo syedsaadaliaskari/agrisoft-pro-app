@@ -1,36 +1,28 @@
-import { ScreenGate } from '@/components/ScreenGate';
-import { hasPermission } from '@/lib/permissions';
-import { getSession } from '@/lib/rbac';
-import { fetchSaleReturns } from '@/lib/shopData';
-import { formatMoney } from '@/lib/format';
+import { Href, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { ActionBar } from '@/components/ActionBar';
 import { EmptyState } from '@/components/EmptyState';
+import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
-import { useCallback, useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
-import type { SaleReturn } from '@/types/models';
+import { listSaleReturns, listSales, money, subscribeErp } from '@/lib/erp';
+import { askPrint } from '@/lib/exportShare';
+import { printHtml, returnPrintHtml } from '@/lib/print';
+import { hasPermission } from '@/lib/permissions';
+import { getSession } from '@/lib/rbac';
 
 export default function SaleReturnsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
-  const [rows, setRows] = useState<SaleReturn[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setRows(await fetchSaleReturns());
-    } catch {
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const router = useRouter();
+  const [, tick] = useState(0);
+  useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
+  const rows = listSaleReturns();
+  const sales = listSales().filter((s) => s.status === 'posted');
+  const can = hasPermission(getSession(), 'sales.return');
 
   return (
     <ScreenGate permission="sales.return">
@@ -38,17 +30,39 @@ export default function SaleReturnsScreen() {
         <FlatList
           data={rows}
           keyExtractor={(item) => item.id}
-          refreshing={loading}
-          onRefresh={() => void load()}
           contentContainerStyle={styles.list}
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          ListEmptyComponent={loading ? null : <EmptyState title="No sale returns" />}
+          ListHeaderComponent={
+            can ? (
+              <View style={{ gap: 8, marginBottom: 12 }}>
+                <Text style={{ color: colors.muted, fontWeight: '700' }}>Return against a sale</Text>
+                {sales.slice(0, 20).map((sale) => (
+                  <Pressable
+                    key={sale.id}
+                    onPress={() => router.push(`/return/sale/${sale.id}` as Href)}
+                    style={[styles.row, { backgroundColor: colors.tintSoft }]}>
+                    <Text style={{ color: colors.text, fontWeight: '700' }}>
+                      {sale.invoiceNo} · {sale.customerName}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={rows.length ? null : <EmptyState title="No sale returns" />}
           renderItem={({ item }) => (
             <View style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
-              <Text style={[styles.name, { color: colors.text }]}>{item.return_no}</Text>
-              <Text style={[styles.meta, { color: colors.muted }]}>
-                {item.return_date}  ·  {formatMoney(item.grand_total)}
+              <Text style={{ color: colors.text, fontWeight: '800' }}>{item.returnNo}</Text>
+              <Text style={{ color: colors.muted }}>
+                {item.returnDate} · {item.partyName} · {money(item.grandTotal)}
               </Text>
+              <ActionBar
+                actions={[
+                  {
+                    label: 'Print',
+                    onPress: () => askPrint((size) => void printHtml(returnPrintHtml(item, 'sale', size), item.returnNo)),
+                  },
+                ]}
+              />
             </View>
           )}
         />
@@ -59,8 +73,6 @@ export default function SaleReturnsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  list: { padding: 16 },
-  row: { borderRadius: cardRadius, padding: 16, minHeight: 64, justifyContent: 'center' },
-  name: { fontSize: 16, fontWeight: '700' },
-  meta: { marginTop: 4, fontSize: 13 },
+  list: { padding: 16, paddingBottom: 40 },
+  row: { borderRadius: cardRadius, padding: 14, gap: 4, marginBottom: 8 },
 });

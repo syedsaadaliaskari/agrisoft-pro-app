@@ -37,7 +37,7 @@ async function listNamed(table: 'units' | 'categories' | 'vendors', select: stri
     .is('deleted_at', null)
     .order('name', { ascending: true });
   if (error) fail(error, "Couldn't load this data.");
-  return (data ?? []) as NamedRow[];
+  return (data ?? []) as unknown as NamedRow[];
 }
 
 export async function fetchUnits(): Promise<NamedRow[]> {
