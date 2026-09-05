@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, Share, StyleSheet, Text } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text } from 'react-native';
 
 import { Card, Field } from '@/components/FormKit';
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -7,6 +7,7 @@ import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { exportShopJson, importShopJson, subscribeErp } from '@/lib/erp';
+import { shareTextOrFile, showShareError } from '@/lib/shareOut';
 
 export default function BackupScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -25,7 +26,15 @@ export default function BackupScreen() {
           <PrimaryButton
             label="Share backup file"
             color={colors.tint}
-            onPress={() => void Share.share({ message: exportShopJson() })}
+            onPress={() =>
+              void shareTextOrFile({
+                filename: 'agrisoft-backup.json',
+                mime: 'application/json',
+                uti: 'public.json',
+                contents: exportShopJson(),
+                title: 'Shop backup',
+              }).catch(showShareError)
+            }
           />
         </Card>
         <Card title="Restore">

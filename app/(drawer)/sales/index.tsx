@@ -1,6 +1,6 @@
 import { Href, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionBar } from '@/components/ActionBar';
 import { EmptyState } from '@/components/EmptyState';
@@ -12,7 +12,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
 import { cancelSale, listSales, money, subscribeErp } from '@/lib/erp';
 import { askExport, askPrint } from '@/lib/exportShare';
-import { printHtml, salePrintHtml, saleReceiptText } from '@/lib/print';
+import { printHtml, salePrintHtml } from '@/lib/print';
 import { hasPermission } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
 
@@ -92,8 +92,9 @@ export default function SalesScreen() {
                     label: 'Print',
                     onPress: () =>
                       askPrint((size) => {
-                        if (size === 'thermal') void Share.share({ message: saleReceiptText(item) });
-                        else void printHtml(salePrintHtml(item, size), item.invoiceNo);
+                        void printHtml(salePrintHtml(item, size), item.invoiceNo).catch((e) =>
+                          Alert.alert(e instanceof Error ? e.message : 'Print failed'),
+                        );
                       }),
                   },
                   {

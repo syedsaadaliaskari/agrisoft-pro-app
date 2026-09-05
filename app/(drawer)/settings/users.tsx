@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -17,7 +18,6 @@ import {
   setUserActive,
   subscribeSession,
 } from '@/lib/rbac';
-import { useEffect } from 'react';
 
 export default function UsersScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -131,10 +131,16 @@ export default function UsersScreen() {
                       const next = on
                         ? role.permissionCodes.filter((code) => code !== perm.code)
                         : [...role.permissionCodes, perm.code];
-                      void setRolePermissions(role.id, next);
+                      void setRolePermissions(role.id, next).catch((err) =>
+                        Alert.alert(err instanceof Error ? err.message : "Couldn't save permissions."),
+                      );
                     }}
                     style={styles.permRow}>
-                    <View style={[styles.box, { borderColor: colors.tint, backgroundColor: on ? colors.tint : 'transparent' }]} />
+                    <Ionicons
+                      name={on ? 'checkbox' : 'square-outline'}
+                      size={22}
+                      color={on ? colors.tint : colors.muted}
+                    />
                     <Text style={{ color: colors.text, flex: 1 }}>{perm.description}</Text>
                   </Pressable>
                 );
@@ -158,6 +164,5 @@ const styles = StyleSheet.create({
   userRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
   name: { fontSize: 16, fontWeight: '700' },
   meta: { fontSize: 13, marginTop: 2 },
-  permRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 40 },
-  box: { width: 20, height: 20, borderRadius: 6, borderWidth: 2 },
+  permRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
 });

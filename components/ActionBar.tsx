@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { font, radius, tokens, typeScale } from '@/constants/theme';
 
 export type ActionItem = {
   label: string;
@@ -23,9 +24,11 @@ export function ActionBar({ actions }: { actions: ActionItem[] }) {
           onPress={action.onPress}
           style={[
             styles.btn,
-            { borderColor: action.danger ? colors.danger : colors.border, backgroundColor: colors.card },
+            action.danger
+              ? { borderColor: tokens.dangerBorder, backgroundColor: tokens.dangerFill }
+              : { borderColor: colors.border, backgroundColor: colors.soft },
           ]}>
-          <Text style={{ color: action.danger ? colors.danger : colors.tint, fontWeight: '800', fontSize: 13 }}>
+          <Text style={{ color: action.danger ? colors.danger : colors.tint, fontWeight: '600', fontSize: typeScale.label, fontFamily: font.fontFamily }}>
             {action.label}
           </Text>
         </Pressable>
@@ -38,8 +41,9 @@ const styles = StyleSheet.create({
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   btn: {
     minHeight: 40,
-    paddingHorizontal: 12,
-    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.lg,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',

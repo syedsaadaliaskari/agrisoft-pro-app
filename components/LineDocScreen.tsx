@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 
-import { Card, Chips, Field, PickRow } from '@/components/FormKit';
+import { Card, Chips, Field, PickRow, TotalRow } from '@/components/FormKit';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -132,6 +132,7 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
             onPress={() => setPick('party')}
           />
           <Chips
+            pad
             value={mode}
             onChange={setMode}
             options={[
@@ -157,16 +158,16 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
               <Text style={{ color: colors.muted }}>{money(line.quantity * line.unitPrice)}</Text>
             </View>
           ))}
-          <Text style={{ color: colors.muted }}>Subtotal {money(totals.subtotal)}</Text>
+          <TotalRow label="Subtotal" value={money(totals.subtotal)} />
           <PickRow label="Discount" selected={money(totals.discountAmount)} onPress={() => setPick('discount')} />
           <Field label="Discount amount" value={discount} onChangeText={setDiscount} keyboardType="decimal-pad" />
           <PickRow label="Addition" selected={money(totals.additionAmount)} onPress={() => setPick('addition')} />
           <Field label="Addition amount" value={addition} onChangeText={setAddition} keyboardType="decimal-pad" />
           <PickRow label="Tax" selected={money(totals.taxAmount)} onPress={() => setPick('tax')} />
           <Field label="Tax amount" value={tax} onChangeText={setTax} keyboardType="decimal-pad" />
-          <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>Grand total {money(totals.grandTotal)}</Text>
+          <TotalRow label="Grand total" value={money(totals.grandTotal)} strong />
           <Field label="Paid" value={paid} onChangeText={setPaid} keyboardType="decimal-pad" placeholder={String(totals.paidAmount)} />
-          <Text style={{ color: colors.muted }}>Balance {money(totals.grandTotal - totals.paidAmount)}</Text>
+          <TotalRow label="Balance" value={money(totals.grandTotal - totals.paidAmount)} />
           <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
           {error ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{error}</Text> : null}
           <PrimaryButton
@@ -275,6 +276,6 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 16, gap: 12, paddingBottom: 40 },
+  content: { padding: 24, gap: 12, paddingBottom: 40 },
   line: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
 });

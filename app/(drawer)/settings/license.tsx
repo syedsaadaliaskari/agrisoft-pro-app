@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenGate } from '@/components/ScreenGate';
@@ -7,6 +7,7 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
 import type { LicensePlan } from '@/lib/activation';
+import { shareTextOrFile, showShareError } from '@/lib/shareOut';
 import { createLicense } from '@/lib/vendor';
 
 const PLANS: { value: LicensePlan; label: string }[] = [
@@ -134,7 +135,14 @@ export default function LicenseScreen() {
             <PrimaryButton
               label="Share code"
               color={colors.tint}
-              onPress={() => void Share.share({ message: lastCode })}
+              onPress={() =>
+                void shareTextOrFile({
+                  filename: 'activation-code.txt',
+                  mime: 'text/plain',
+                  contents: lastCode,
+                  title: 'Activation code',
+                }).catch(showShareError)
+              }
             />
           </View>
         ) : null}

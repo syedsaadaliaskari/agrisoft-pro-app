@@ -8,6 +8,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppLogo } from '@/components/AppLogo';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { font, overline, typeScale } from '@/constants/theme';
 import { filterNavForUser } from '@/lib/nav';
 import { getSession, signOut } from '@/lib/rbac';
 
@@ -26,9 +27,10 @@ export function ShopDrawerContent(props: ComponentProps<typeof DrawerContentScro
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={{ paddingBottom: 24 }}>
       <View style={[styles.brand, { borderBottomColor: colors.border }]}>
-        <AppLogo size={40} />
+        <AppLogo size={36} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.brandName, { color: colors.text }]}>Agri Soft Pro</Text>
+          <Text style={[styles.pro, { color: colors.tint }]}>PRO</Text>
           <Text style={[styles.brandMeta, { color: colors.muted }]}>
             {user?.fullName} · {user?.roleName}
           </Text>
@@ -42,7 +44,7 @@ export function ShopDrawerContent(props: ComponentProps<typeof DrawerContentScro
             <Pressable
               onPress={() => setOpen((current) => ({ ...current, [group.title]: !expanded }))}
               style={styles.groupHead}>
-              <Ionicons name={group.icon as IconName} size={18} color={colors.muted} />
+              <Ionicons name={group.icon as IconName} size={16} color={colors.muted} />
               <Text style={[styles.groupTitle, { color: colors.muted }]}>{group.title}</Text>
               <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={16} color={colors.muted} />
             </Pressable>
@@ -57,8 +59,8 @@ export function ShopDrawerContent(props: ComponentProps<typeof DrawerContentScro
                         styles.item,
                         active && { backgroundColor: colors.tintSoft },
                       ]}>
-                      <Ionicons name={item.icon as IconName} size={18} color={active ? colors.tint : colors.text} />
-                      <Text style={[styles.itemLabel, { color: active ? colors.tint : colors.text }]}>
+                      <Ionicons name={item.icon as IconName} size={16} color={active ? colors.tint : colors.muted} />
+                      <Text style={[styles.itemLabel, { color: active ? colors.tint : colors.muted }]}>
                         {item.label}
                       </Text>
                     </Pressable>
@@ -93,8 +95,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  brandName: { fontSize: 16, fontWeight: '800' },
-  brandMeta: { fontSize: 12, marginTop: 2 },
+  brandName: { ...font, fontSize: typeScale.section, fontWeight: '600' },
+  pro: { ...overline, marginTop: 2 },
+  brandMeta: { ...font, fontSize: typeScale.label, marginTop: 2 },
   groupHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -102,17 +105,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  groupTitle: { flex: 1, fontSize: 12, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },
+  groupTitle: { ...overline, flex: 1 },
   item: {
     minHeight: 44,
     marginHorizontal: 8,
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  itemLabel: { fontSize: 15, fontWeight: '600' },
+  itemLabel: { ...font, fontSize: 13, fontWeight: '500' },
   logout: {
     minHeight: 48,
     marginTop: 16,

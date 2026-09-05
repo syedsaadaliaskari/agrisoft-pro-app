@@ -1,6 +1,2 @@
-import { useColorScheme as useColorSchemeCore } from 'react-native';
-
-export const useColorScheme = () => {
-  const coreScheme = useColorSchemeCore();
-  return coreScheme === 'unspecified' ? 'light' : coreScheme;
-};
+/** Light theme only — DESIGN.md. Do not invent a dark palette. */
+export const useColorScheme = () => 'light' as const;

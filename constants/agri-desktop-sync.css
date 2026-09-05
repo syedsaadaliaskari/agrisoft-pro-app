@@ -1,0 +1,50 @@
+/* Agri Soft Pro — shared light-theme tokens. Source: DESIGN.md. Do not invent colors. */
+:root,
+[data-theme="light"] {
+  --bg: #f3f5f8;
+  --bg-elevated: #ffffff;
+  --bg-soft: #e9eef3;
+  --border: #d3dae3;
+  --border-strong: #b5c0ce;
+  --text: #1a2330;
+  --text-muted: #5c6b7d;
+  --accent: #2a8f9a;
+  --accent-hover: #237a83;
+  --accent-soft: rgba(42, 143, 154, 0.12);
+  --success: #2f7d55;
+  --danger: #c43d3d;
+  --info: #3a79b8;
+  --logo-ink: #f4fbfc;
+  --atmosphere-1: rgba(42, 143, 154, 0.09);
+  --atmosphere-2: rgba(58, 121, 184, 0.06);
+  --sidebar-width: 260px;
+  --font-display: "Segoe UI", "Segoe UI Variable", system-ui, sans-serif;
+  --font-body: "Segoe UI", "Segoe UI Variable", system-ui, sans-serif;
+}
+
+html[lang="ur"],
+:lang(ur) {
+  --font-display: "Nirmala UI", "Segoe UI", "Noto Nastaliq Urdu", Tahoma, sans-serif;
+  --font-body: "Nirmala UI", "Segoe UI", "Noto Nastaliq Urdu", Tahoma, sans-serif;
+}
+
+html,
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 10% -10%, var(--atmosphere-1), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 0%, var(--atmosphere-2), transparent);
+  background-attachment: fixed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

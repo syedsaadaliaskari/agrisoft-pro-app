@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ShopDrawerContent } from '@/components/ShopDrawer';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { sidebarWidth, topbarHeight } from '@/constants/layout';
+import { font, typeScale } from '@/constants/theme';
 import { getSession, subscribeSession } from '@/lib/rbac';
 
 export default function DrawerLayout() {
@@ -22,11 +24,11 @@ export default function DrawerLayout() {
     <Drawer
       drawerContent={(props) => <ShopDrawerContent {...props}>{null}</ShopDrawerContent>}
       screenOptions={{
-        headerStyle: { backgroundColor: colors.header },
+        headerStyle: { backgroundColor: colors.header, height: topbarHeight + insets.top },
         headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: '700' },
+        headerTitleStyle: { ...font, fontWeight: '600', fontSize: typeScale.title },
         headerLeft: () => <DrawerToggleButton tintColor={colors.text} />,
-        drawerStyle: { width: 300, paddingTop: insets.top, backgroundColor: colors.header },
+        drawerStyle: { width: sidebarWidth, paddingTop: insets.top, backgroundColor: colors.header, borderRightWidth: 1, borderRightColor: colors.border },
         sceneStyle: { backgroundColor: colors.background },
       }}>
       <Drawer.Screen name="index" options={{ title: 'Dashboard' }} />

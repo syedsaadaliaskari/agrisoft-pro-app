@@ -6,7 +6,8 @@ import { ScreenGate } from '@/components/ScreenGate';
 import { VendorDashboard } from '@/components/VendorDashboard';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { cardRadius, cardShadow } from '@/constants/layout';
+import { cardRadius, cardShadow, pagePadding } from '@/constants/layout';
+import { moneyText, overline } from '@/constants/theme';
 import { dashboardSummary, money, subscribeErp } from '@/lib/erp';
 import { formatWhen } from '@/lib/format';
 import { getSyncStatus, subscribeSyncStatus } from '@/lib/syncStatus';
@@ -96,12 +97,12 @@ function ShopHomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 16, gap: 12, paddingBottom: 40 },
+  content: { padding: pagePadding, gap: 12, paddingBottom: 40 },
   analytics: { padding: 16 },
-  metricName: { fontSize: 13, fontWeight: '700' },
-  metricValue: { fontSize: 34, fontWeight: '800' },
-  grid: { flexDirection: 'row', gap: 10 },
-  stat: { flex: 1, padding: 14, minHeight: 88, justifyContent: 'center' },
-  cardLabel: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
-  statValue: { fontSize: 20, fontWeight: '800' },
+  metricName: { ...overline },
+  metricValue: { ...moneyText, fontSize: 34, fontWeight: '700' },
+  grid: { flexDirection: 'row', gap: 12 },
+  stat: { flex: 1, padding: 16, minHeight: 88, justifyContent: 'center' },
+  cardLabel: { ...overline, marginBottom: 6 },
+  statValue: { ...moneyText, fontSize: 20, fontWeight: '700' },
 });

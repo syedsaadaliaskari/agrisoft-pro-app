@@ -124,28 +124,19 @@ async function ensureVendorRbac(): Promise<void> {
     }
   }
   const adminRole = store.roles.find((role) => role.name === 'Admin');
-  if (adminRole) {
-    const missing = shopAdminCodes().filter((code) => !adminRole.permissionCodes.includes(code));
-    if (missing.length) {
-      adminRole.permissionCodes = [...adminRole.permissionCodes, ...missing];
-      changed = true;
-    }
+  if (adminRole && adminRole.permissionCodes.length === 0) {
+    adminRole.permissionCodes = shopAdminCodes();
+    changed = true;
   }
   const cashierRole = store.roles.find((role) => role.name === 'Cashier');
-  if (cashierRole) {
-    const missing = [...CASHIER_CODES].filter((code) => !cashierRole.permissionCodes.includes(code));
-    if (missing.length) {
-      cashierRole.permissionCodes = [...cashierRole.permissionCodes, ...missing];
-      changed = true;
-    }
+  if (cashierRole && cashierRole.permissionCodes.length === 0) {
+    cashierRole.permissionCodes = [...CASHIER_CODES];
+    changed = true;
   }
   const accountantRole = store.roles.find((role) => role.name === 'Accountant');
-  if (accountantRole) {
-    const missing = [...ACCOUNTANT_CODES].filter((code) => !accountantRole.permissionCodes.includes(code));
-    if (missing.length) {
-      accountantRole.permissionCodes = [...accountantRole.permissionCodes, ...missing];
-      changed = true;
-    }
+  if (accountantRole && accountantRole.permissionCodes.length === 0) {
+    accountantRole.permissionCodes = [...ACCOUNTANT_CODES];
+    changed = true;
   }
   const superRole = store.roles.find((role) => role.name === 'Super Admin');
   const adminUser = store.users.find((user) => user.username === 'admin');

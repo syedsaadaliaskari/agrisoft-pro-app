@@ -1,6 +1,8 @@
-import { Alert, Share } from 'react-native';
+import { Alert } from 'react-native';
 
-import { printHtml, tablePrintHtml, type ReceiptSize } from '@/lib/print';
+import { showActionSheet } from '@/lib/actionSheet';
+import { tablePrintHtml, type ReceiptSize } from '@/lib/print';
+import { safeFilename, sharePdfFromHtml, shareTextOrFile, showShareError } from '@/lib/shareOut';
 
 export type ExportColumn<T> = { key: string; label: string; get?: (row: T) => string | number };
 
@@ -28,12 +30,25 @@ export async function exportRows<T>(opts: {
   kind: 'json' | 'excel' | 'pdf';
 }) {
   if (!opts.rows.length) throw new Error('Nothing to export');
+  const base = safeFilename(opts.filename || opts.title, opts.kind === 'excel' ? 'csv' : opts.kind);
   if (opts.kind === 'json') {
-    await Share.share({ title: opts.title, message: JSON.stringify(opts.rows, null, 2) });
+    await shareTextOrFile({
+      filename: base.replace(/\.json$/i, '') + '.json',
+      mime: 'application/json',
+      uti: 'public.json',
+      contents: JSON.stringify(opts.rows, null, 2),
+      title: opts.title,
+    });
     return;
   }
   if (opts.kind === 'excel') {
-    await Share.share({ title: opts.title, message: toCsv(opts.columns, opts.rows) });
+    await shareTextOrFile({
+      filename: base.replace(/\.csv$/i, '') + '.csv',
+      mime: 'text/csv',
+      uti: 'public.comma-separated-values-text',
+      contents: toCsv(opts.columns, opts.rows),
+      title: opts.title,
+    });
     return;
   }
   const html = tablePrintHtml(
@@ -42,7 +57,14 @@ export async function exportRows<T>(opts: {
     opts.rows.map((row) => opts.columns.map((col) => cell(col, row))),
     'a4',
   );
-  await printHtml(html, opts.title);
+  await sharePdfFromHtml(html, opts.title);
+}
+
+function runExport<T>(
+  opts: { filename: string; title: string; columns: ExportColumn<T>[]; rows: T[] },
+  kind: 'json' | 'excel' | 'pdf',
+) {
+  void exportRows({ ...opts, kind }).catch(showShareError);
 }
 
 export function askExport<T>(opts: {
@@ -51,18 +73,28 @@ export function askExport<T>(opts: {
   columns: ExportColumn<T>[];
   rows: T[];
 }) {
-  Alert.alert('Export', opts.title, [
-    { text: 'JSON', onPress: () => void exportRows({ ...opts, kind: 'json' }).catch((e) => Alert.alert(e instanceof Error ? e.message : 'Export failed')) },
-    { text: 'Excel', onPress: () => void exportRows({ ...opts, kind: 'excel' }).catch((e) => Alert.alert(e instanceof Error ? e.message : 'Export failed')) },
-    { text: 'PDF', onPress: () => void exportRows({ ...opts, kind: 'pdf' }).catch((e) => Alert.alert(e instanceof Error ? e.message : 'Export failed')) },
-    { text: 'Cancel', style: 'cancel' },
-  ]);
+  if (!opts.rows.length) {
+    Alert.alert('Nothing to export', 'This list is empty.');
+    return;
+  }
+  showActionSheet({
+    title: 'Export',
+    message: opts.title,
+    options: [
+      { label: 'JSON', onPress: () => runExport(opts, 'json') },
+      { label: 'Excel (CSV)', onPress: () => runExport(opts, 'excel') },
+      { label: 'PDF', onPress: () => runExport(opts, 'pdf') },
+    ],
+  });
 }
 
 export function askPrint(run: (size: ReceiptSize) => void) {
-  Alert.alert('Print', 'Choose a size', [
-    { text: 'Thermal', onPress: () => run('thermal') },
-    { text: 'A4', onPress: () => run('a4') },
-    { text: 'Cancel', style: 'cancel' },
-  ]);
+  showActionSheet({
+    title: 'Print',
+    message: 'Choose a size',
+    options: [
+      { label: 'Thermal', onPress: () => run('thermal') },
+      { label: 'A4', onPress: () => run('a4') },
+    ],
+  });
 }

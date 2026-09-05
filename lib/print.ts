@@ -1,5 +1,3 @@
-import { Platform, Share } from 'react-native';
-
 import {
   getSettings,
   money,
@@ -8,6 +6,7 @@ import {
   type SaleDoc,
   type Voucher,
 } from '@/lib/erp';
+import { sharePdfFromHtml, showShareError } from '@/lib/shareOut';
 
 export type ReceiptSize = 'thermal' | 'a4';
 
@@ -252,32 +251,12 @@ export function tablePrintHtml(title: string, columns: string[], rows: string[][
   );
 }
 
-function htmlToText(html: string) {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|tr|h1|h2)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
 export async function printHtml(html: string, title: string) {
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const w = window.open('', '_blank');
-    if (w) {
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-      w.print();
-      return;
-    }
+  try {
+    await sharePdfFromHtml(html, title);
+  } catch (err) {
+    showShareError(err);
   }
-  await Share.share({ title, message: htmlToText(html) });
 }
 
 export function saleReceiptText(sale: SaleDoc) {

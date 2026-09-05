@@ -1,32 +1,28 @@
-const tint = '#1B7A45';
+import { tokens } from '@/constants/theme';
+
+const light = {
+  text: tokens.text,
+  muted: tokens.textMuted,
+  background: tokens.bg,
+  card: tokens.bgElevated,
+  soft: tokens.bgSoft,
+  border: tokens.border,
+  borderStrong: tokens.borderStrong,
+  tint: tokens.accent,
+  tintHover: tokens.accentHover,
+  tintSoft: tokens.accentSoft,
+  logoInk: tokens.logoInk,
+  tabIconDefault: tokens.textMuted,
+  tabIconSelected: tokens.accent,
+  success: tokens.success,
+  danger: tokens.danger,
+  info: tokens.info,
+  warning: tokens.due,
+  header: tokens.bgElevated,
+};
 
 export default {
-  light: {
-    text: '#163024',
-    muted: '#5E7268',
-    background: '#F3F6F2',
-    card: '#FFFFFF',
-    border: '#DCE6DF',
-    tint,
-    tintSoft: '#E6F5EC',
-    tabIconDefault: '#8A9A90',
-    tabIconSelected: tint,
-    danger: '#C1352C',
-    warning: '#B45309',
-    header: '#FFFFFF',
-  },
-  dark: {
-    text: '#E8F0EB',
-    muted: '#8FA198',
-    background: '#101814',
-    card: '#18211C',
-    border: '#2A3A32',
-    tint: '#5FCB8A',
-    tintSoft: '#173326',
-    tabIconDefault: '#7A8C82',
-    tabIconSelected: '#5FCB8A',
-    danger: '#F97066',
-    warning: '#FDB022',
-    header: '#18211C',
-  },
+  light,
+  /** Light theme only — same tokens. Do not invent a dark palette. */
+  dark: light,
 };

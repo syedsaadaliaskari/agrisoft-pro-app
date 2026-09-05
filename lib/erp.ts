@@ -550,7 +550,8 @@ export async function hydrateErp() {
 
 export function money(value: number) {
   const n = Number(value) || 0;
-  return `${store.settings.currency_symbol} ${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  const symbol = store.settings.currency_symbol || 'Rs';
+  return `${symbol} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function getSettings() {

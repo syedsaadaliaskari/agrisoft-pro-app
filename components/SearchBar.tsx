@@ -3,6 +3,7 @@ import { StyleSheet, TextInput, View } from 'react-native';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { font, radius, typeScale } from '@/constants/theme';
 
 type Props = {
   value: string;
@@ -15,8 +16,8 @@ export function SearchBar({ value, onChangeText, placeholder = 'Search by name o
   const colors = Colors[scheme];
 
   return (
-    <View style={[styles.wrap, { backgroundColor: colors.card }]}>
-      <Ionicons name="search" size={20} color={colors.muted} />
+    <View style={[styles.wrap, { backgroundColor: colors.background, borderColor: colors.border }]}>
+      <Ionicons name="search" size={18} color={colors.muted} />
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -36,18 +37,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    minHeight: 52,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    shadowColor: '#1A2E24',
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    minHeight: 44,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingHorizontal: 12,
   },
   input: {
+    ...font,
     flex: 1,
-    fontSize: 16,
-    paddingVertical: 12,
+    fontSize: typeScale.body,
+    paddingVertical: 8,
   },
 });

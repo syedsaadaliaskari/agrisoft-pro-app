@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
@@ -7,6 +7,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
 import { deleteLicense, hydrateVendor, listLicenses, subscribeVendor } from '@/lib/vendor';
 import type { LicenseRow } from '@/lib/activation';
+import { shareTextOrFile, showShareError } from '@/lib/shareOut';
 
 export default function ActivatedListScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -62,9 +63,14 @@ export default function ActivatedListScreen() {
               <View style={styles.actions}>
                 <Pressable
                   onPress={() => {
-                    void Share.share({ message: row.activationCode }).then(() =>
-                      setMsg(`Activation code ready for ${row.name}.`),
-                    );
+                    void shareTextOrFile({
+                      filename: 'activation-code.txt',
+                      mime: 'text/plain',
+                      contents: row.activationCode,
+                      title: `Activation ${row.name}`,
+                    })
+                      .then(() => setMsg(`Activation code ready for ${row.name}.`))
+                      .catch(showShareError);
                   }}>
                   <Text style={{ color: colors.tint, fontWeight: '800' }}>Share code</Text>
                 </Pressable>

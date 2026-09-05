@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppLogo } from '@/components/AppLogo';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { font, radius, tokens, typeScale } from '@/constants/theme';
 import { getSession, signInWithPassword } from '@/lib/rbac';
 
 export default function LoginScreen() {
@@ -45,7 +46,7 @@ export default function LoginScreen() {
         autoCapitalize="none"
         placeholder="Username"
         placeholderTextColor={colors.muted}
-        style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+        style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
       />
       <TextInput
         value={password}
@@ -53,13 +54,13 @@ export default function LoginScreen() {
         secureTextEntry
         placeholder="Password"
         placeholderTextColor={colors.muted}
-        style={[styles.input, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}
+        style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
       />
       {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
       <Pressable
         onPress={() => void submit()}
         disabled={busy}
-        style={[styles.button, { backgroundColor: colors.tint, opacity: busy ? 0.6 : 1 }]}>
+        style={[styles.button, { backgroundColor: colors.tint, opacity: busy ? 0.5 : 1 }]}>
         <Text style={styles.buttonText}>{busy ? 'Please wait…' : 'Sign in'}</Text>
       </Pressable>
     </SafeAreaView>
@@ -68,26 +69,29 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
-  title: { fontSize: 26, fontWeight: '800', marginTop: 8 },
-  sub: { fontSize: 15, marginBottom: 8 },
+  title: { ...font, fontSize: 26, fontWeight: '600', marginTop: 8 },
+  sub: { ...font, fontSize: typeScale.body, marginBottom: 8 },
   input: {
+    ...font,
     width: '100%',
     maxWidth: 360,
-    minHeight: 52,
+    minHeight: 44,
     borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    fontSize: 16,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: typeScale.body,
   },
-  error: { fontSize: 14, fontWeight: '600' },
+  error: { ...font, fontSize: typeScale.label, fontWeight: '500' },
   button: {
     marginTop: 8,
-    minHeight: 52,
+    minHeight: 44,
     minWidth: 220,
-    borderRadius: 16,
+    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  buttonText: { ...font, color: tokens.logoInk, fontSize: typeScale.body, fontWeight: '600' },
 });

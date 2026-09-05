@@ -1,12 +1,12 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
+import { AppActionSheet } from '@/components/AppActionSheet';
 import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
 import { hydrateErp } from '@/lib/erp';
 import { hydrateRbac } from '@/lib/rbac';
 import { hydrateVendor } from '@/lib/vendor';
@@ -32,21 +32,7 @@ const agriLight = {
   },
 };
 
-const agriDark = {
-  ...DarkTheme,
-  colors: {
-    ...DarkTheme.colors,
-    primary: Colors.dark.tint,
-    background: Colors.dark.background,
-    card: Colors.dark.card,
-    text: Colors.dark.text,
-    border: Colors.dark.border,
-    notification: Colors.dark.tint,
-  },
-};
-
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -66,8 +52,8 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider value={colorScheme === 'dark' ? agriDark : agriLight}>
-        <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+      <ThemeProvider value={agriLight}>
+        <StatusBar style="dark" />
         <Stack>
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
@@ -85,6 +71,7 @@ export default function RootLayout() {
           <Stack.Screen name="vendor/[id]" options={{ title: 'Vendor', headerBackTitle: 'Back' }} />
           <Stack.Screen name="return/[kind]/[id]" options={{ title: 'Return', headerBackTitle: 'Back' }} />
         </Stack>
+        <AppActionSheet />
       </ThemeProvider>
     </GestureHandlerRootView>
   );

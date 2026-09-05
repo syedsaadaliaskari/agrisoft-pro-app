@@ -3,6 +3,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { radius, tokens } from '@/constants/theme';
 
 type Tone = 'info' | 'ok' | 'warn' | 'error';
 
@@ -18,27 +19,21 @@ export function StatusBanner({ title, detail, tone = 'info', loading }: Props) {
   const colors = Colors[scheme];
   const background =
     tone === 'ok'
-      ? scheme === 'dark'
-        ? '#1A3324'
-        : '#E7F5EC'
+      ? tokens.successSoft
       : tone === 'error'
-        ? scheme === 'dark'
-          ? '#3A1C1A'
-          : '#FCEBEA'
+        ? tokens.dangerSoft
         : tone === 'warn'
-          ? scheme === 'dark'
-            ? '#3A2A12'
-            : '#FFF4E5'
+          ? tokens.dueSoft
           : colors.card;
   const icon =
     tone === 'ok' ? 'checkmark-circle' : tone === 'error' ? 'alert-circle' : tone === 'warn' ? 'warning' : 'information-circle';
 
   return (
-    <View style={[styles.wrap, { backgroundColor: background }]}>
+    <View style={[styles.wrap, { backgroundColor: background, borderColor: colors.border }]}>
       {loading ? (
         <ActivityIndicator color={colors.tint} />
       ) : (
-        <Ionicons name={icon} size={22} color={tone === 'error' ? colors.danger : colors.tint} />
+        <Ionicons name={icon} size={22} color={tone === 'error' ? colors.danger : tone === 'ok' ? colors.success : colors.tint} />
       )}
       <View style={styles.textWrap}>
         <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
@@ -53,7 +48,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    borderRadius: 16,
+    borderRadius: radius['2xl'],
+    borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },

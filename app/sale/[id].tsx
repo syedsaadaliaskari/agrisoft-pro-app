@@ -1,4 +1,4 @@
-import { Alert, ScrollView, Share, Text, View } from 'react-native';
+import { Alert, ScrollView, Text, View } from 'react-native';
 import { Href, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ActionBar } from '@/components/ActionBar';
@@ -7,7 +7,7 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { cancelSale, getSale, money } from '@/lib/erp';
 import { askPrint } from '@/lib/exportShare';
-import { printHtml, salePrintHtml, saleReceiptText } from '@/lib/print';
+import { printHtml, salePrintHtml } from '@/lib/print';
 import { hasPermission } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
 
@@ -59,8 +59,9 @@ export default function SaleDetail() {
                   label: 'Print',
                   onPress: () =>
                     askPrint((size) => {
-                      if (size === 'thermal') void Share.share({ message: saleReceiptText(sale) });
-                      else void printHtml(salePrintHtml(sale, size), sale.invoiceNo);
+                      void printHtml(salePrintHtml(sale, size), sale.invoiceNo).catch((e) =>
+                        Alert.alert(e instanceof Error ? e.message : 'Print failed'),
+                      );
                     }),
                 },
                 {
