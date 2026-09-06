@@ -38,8 +38,9 @@ export default function RootLayout() {
   useEffect(() => {
     void Promise.all([hydrateRbac(), hydrateVendor(), hydrateErp()]).then(async () => {
       try {
-        const { hydrateCloudSync } = await import('@/lib/cloudSync');
+        const { hydrateCloudSync, startCloudSyncScheduler } = await import('@/lib/cloudSync');
         await hydrateCloudSync();
+        startCloudSyncScheduler();
       } catch {
         /* offline is fine */
       }

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState } from 'react-native';
 
 import { getAppConfig } from '@/lib/config';
 import {
@@ -964,8 +965,12 @@ export async function hydrateCloudSync() {
   if (pulled) cloudReady = true;
   try {
     await pullShopFromCloud();
+    lastAutoAt = Date.now();
+    wasOnline = true;
   } catch (err) {
-    markRefreshError(describeError(err));
+    const message = describeError(err);
+    markRefreshError(message);
+    if (/offline/i.test(message)) wasOnline = false;
     if (cloudReady) setErpPersistHook(schedulePush);
   }
 }
@@ -979,4 +984,69 @@ export async function syncShopNow() {
     markRefreshError(message);
     throw new Error(message);
   }
+}
+
+const MIN_GAP_MS = 60_000;
+const INTERVAL_MS = 15 * 60 * 1000;
+const ONLINE_POLL_MS = 30_000;
+
+let autoSyncing = false;
+let lastAutoAt = 0;
+let wasOnline = true;
+let schedulerStarted = false;
+let appStateSub: { remove: () => void } | null = null;
+
+async function isCloudReachable(): Promise<boolean> {
+  try {
+    const { client } = requireCloud();
+    const { error } = await client.from('tenants').select('id').limit(1);
+    if (error && /failed to fetch|network request failed|network error/i.test(error.message)) {
+      return false;
+    }
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '';
+    if (/offline|fetch|network/i.test(message)) return false;
+    return getAppConfig().isReady;
+  }
+}
+
+/** Same idea as desktop: when the app is open and the net is back, books refresh without tapping Sync. */
+export async function maybeAutoSync(options?: { force?: boolean }) {
+  if (!getAppConfig().isReady) return;
+  if (autoSyncing) return;
+  if (!options?.force && Date.now() - lastAutoAt < MIN_GAP_MS) return;
+  if (!(await isCloudReachable())) return;
+
+  autoSyncing = true;
+  lastAutoAt = Date.now();
+  try {
+    await syncShopNow();
+  } catch {
+    /* status already recorded */
+  } finally {
+    autoSyncing = false;
+  }
+}
+
+export function startCloudSyncScheduler() {
+  if (schedulerStarted) return;
+  schedulerStarted = true;
+
+  const tickOnline = async () => {
+    const online = await isCloudReachable();
+    if (online && !wasOnline) {
+      void maybeAutoSync({ force: true });
+    }
+    wasOnline = online;
+  };
+
+  void tickOnline();
+  setInterval(() => void maybeAutoSync(), INTERVAL_MS);
+  setInterval(() => void tickOnline(), ONLINE_POLL_MS);
+
+  appStateSub?.remove();
+  appStateSub = AppState.addEventListener('change', (state) => {
+    if (state === 'active') void maybeAutoSync();
+  });
 }

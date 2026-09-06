@@ -75,6 +75,9 @@ export default function SettingsScreen() {
           </Card>
           <Card title="Cloud">
             <Text style={{ color: colors.muted }}>
+              Updates by itself when this phone is online — when you open the app, when Wi‑Fi comes back, and about every 15 minutes while it stays open. Same idea as the shop PC.
+            </Text>
+            <Text style={{ color: colors.muted }}>
               Last sync {formatWhen(sync.lastRefreshAt)}
               {sync.customerCount != null ? ` · ${sync.customerCount} customers` : ''}
               {sync.productCount != null ? ` · ${sync.productCount} products` : ''}
@@ -83,6 +86,7 @@ export default function SettingsScreen() {
             {sync.lastError ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{sync.lastError}</Text> : null}
             <PrimaryButton
               label={syncBusy ? 'Syncing…' : 'Sync now'}
+              tone="ghost"
               color={colors.tint}
               disabled={syncBusy}
               onPress={async () => {
