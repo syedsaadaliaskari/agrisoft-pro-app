@@ -22,8 +22,16 @@ import {
 import { newId } from '@/lib/id';
 import { getSupabase } from '@/lib/supabase';
 import { markRefreshError, markRefreshSuccess } from '@/lib/syncStatus';
+import {
+  dropTombstones,
+  hydrateTombstones,
+  isTombstoned,
+  listTombstones,
+  type ShopTable,
+} from '@/lib/tombstones';
 
 const PULLED_KEY = 'agrisoft.cloud.pulled';
+const LAST_PULL_KEY = 'agrisoft.cloud.lastPullAt';
 const PAGE = 1000;
 const BATCH = 80;
 
@@ -83,6 +91,41 @@ async function upsertTable(table: string, rows: Record<string, unknown>[]) {
   }
 }
 
+async function pushTombstones() {
+  await hydrateTombstones();
+  const pending = listTombstones();
+  if (!pending.length) return;
+  const { client, tenantId } = requireCloud();
+  const done: typeof pending = [];
+  for (const row of pending) {
+    const { error } = await client
+      .from(row.table)
+      .update({ deleted_at: row.at, updated_at: row.at })
+      .eq('id', row.id)
+      .eq('tenant_id', tenantId);
+    if (error) throw new Error(describeError(error, "Couldn't update the cloud after a delete."));
+    done.push(row);
+  }
+  await dropTombstones(done);
+}
+
+function keepLocalOnly<T extends { id: string }>(
+  local: T[],
+  remote: T[],
+  table: ShopTable,
+  updatedAt: (row: T) => string | undefined,
+  lastPull: string | null,
+) {
+  const remoteIds = new Set(remote.map((row) => row.id));
+  return local.filter((row) => {
+    if (remoteIds.has(row.id) || isTombstoned(table, row.id)) return false;
+    const at = updatedAt(row);
+    if (!at) return false;
+    if (!lastPull) return true;
+    return at > lastPull;
+  });
+}
+
 function namedFrom(
   rows: {
     id: string;
@@ -122,6 +165,7 @@ function partyFrom(
     balance_type?: string | null;
     credit_limit?: number | null;
     is_active?: boolean | null;
+    updated_at?: string | null;
   }[],
   fallbackBalance: Party['balanceType'],
 ): Party[] {
@@ -137,11 +181,14 @@ function partyFrom(
     balanceType: row.balance_type === 'credit' || row.balance_type === 'debit' ? row.balance_type : fallbackBalance,
     creditLimit: n(row.credit_limit),
     isActive: row.is_active !== false,
+    updatedAt: text(row.updated_at) || undefined,
   }));
 }
 
 export async function pullShopFromCloud() {
   const { tenantId } = requireCloud();
+  const local = getShopSnapshot();
+  const lastPull = await AsyncStorage.getItem(LAST_PULL_KEY);
   const [
     settings,
     units,
@@ -242,6 +289,7 @@ export async function pullShopFromCloud() {
     taxId: row.tax_id ? text(row.tax_id) : null,
     reorderLevel: n(row.reorder_level, 5),
     isActive: row.is_active !== false,
+    updatedAt: text(row.updated_at) || undefined,
     variants: variantsByProduct.get(text(row.id)) ?? [],
   }));
 
@@ -317,6 +365,7 @@ export async function pullShopFromCloud() {
       status: status === 'cancelled' || status === 'deleted' ? 'cancelled' : 'posted',
       items: saleLines.get(text(row.id)) ?? [],
       deletedAt: status === 'deleted' ? stamp() : null,
+      updatedAt: text(row.updated_at) || undefined,
     };
   });
 
@@ -356,6 +405,7 @@ export async function pullShopFromCloud() {
       status: status === 'cancelled' || status === 'deleted' ? 'cancelled' : 'posted',
       items: purchaseLines.get(text(row.id)) ?? [],
       deletedAt: status === 'deleted' ? stamp() : null,
+      updatedAt: text(row.updated_at) || undefined,
     };
   });
 
@@ -443,6 +493,16 @@ export async function pullShopFromCloud() {
   if (settingMap.n8n_enabled != null) settingsPatch.n8n_enabled = settingMap.n8n_enabled;
   if (settingMap.n8n_webhook_url != null) settingsPatch.n8n_webhook_url = settingMap.n8n_webhook_url;
 
+  const remoteCustomers = partyFrom(customers as never, 'debit').filter(
+    (row) => row.isActive && !isTombstoned('customers', row.id),
+  );
+  const remoteVendors = partyFrom(vendors as never, 'credit').filter(
+    (row) => row.isActive && !isTombstoned('vendors', row.id),
+  );
+  const remoteProducts = mappedProducts.filter((row) => row.isActive && !isTombstoned('products', row.id));
+  const remoteSales = mappedSales.filter((row) => !row.deletedAt && !isTombstoned('sales', row.id));
+  const remotePurchases = mappedPurchases.filter((row) => !row.deletedAt && !isTombstoned('purchases', row.id));
+
   await applyCloudSnapshot({
     settings: settingsPatch,
     settingIds,
@@ -451,12 +511,27 @@ export async function pullShopFromCloud() {
     taxes: namedFrom(taxes),
     discounts: namedFrom(discounts),
     additions: namedFrom(additions),
-    customers: partyFrom(customers as never, 'debit'),
-    vendors: partyFrom(vendors as never, 'credit'),
-    products: mappedProducts,
+    customers: [
+      ...remoteCustomers,
+      ...keepLocalOnly(local.customers, remoteCustomers, 'customers', (row) => row.updatedAt, lastPull),
+    ],
+    vendors: [
+      ...remoteVendors,
+      ...keepLocalOnly(local.vendors, remoteVendors, 'vendors', (row) => row.updatedAt, lastPull),
+    ],
+    products: [
+      ...remoteProducts,
+      ...keepLocalOnly(local.products, remoteProducts, 'products', (row) => row.updatedAt, lastPull),
+    ],
     accounts: mappedAccounts,
-    sales: mappedSales,
-    purchases: mappedPurchases,
+    sales: [
+      ...remoteSales,
+      ...keepLocalOnly(local.sales, remoteSales, 'sales', (row) => row.updatedAt, lastPull),
+    ],
+    purchases: [
+      ...remotePurchases,
+      ...keepLocalOnly(local.purchases, remotePurchases, 'purchases', (row) => row.updatedAt, lastPull),
+    ],
     saleReturns: mappedSaleReturns,
     purchaseReturns: mappedPurchaseReturns,
     vouchers: mappedVouchers,
@@ -473,11 +548,12 @@ export async function pullShopFromCloud() {
 
   cloudReady = true;
   await AsyncStorage.setItem(PULLED_KEY, '1');
+  await AsyncStorage.setItem(LAST_PULL_KEY, stamp());
   setErpPersistHook(schedulePush);
   markRefreshSuccess({
-    customerCount: mappedSales.length ? customers.length : customers.length,
-    productCount: mappedProducts.length,
-    saleCount: mappedSales.length,
+    customerCount: remoteCustomers.length,
+    productCount: remoteProducts.length,
+    saleCount: remoteSales.length,
   });
   void tenantId;
 }
@@ -546,14 +622,16 @@ export async function pushShopToCloud() {
     });
 
     await upsertTable('settings', settings);
-    await upsertTable('units', namedPayload('units', shop.units, tenantId, now).map(stripUndef));
-    await upsertTable('categories', namedPayload('categories', shop.categories, tenantId, now).map(stripUndef));
-    await upsertTable('taxes', namedPayload('taxes', shop.taxes, tenantId, now).map(stripUndef));
-    await upsertTable('discounts', namedPayload('discounts', shop.discounts, tenantId, now).map(stripUndef));
-    await upsertTable('additions', namedPayload('additions', shop.additions, tenantId, now).map(stripUndef));
+    await upsertTable('units', namedPayload('units', shop.units.filter((row) => row.isActive), tenantId, now).map(stripUndef));
+    await upsertTable('categories', namedPayload('categories', shop.categories.filter((row) => row.isActive), tenantId, now).map(stripUndef));
+    await upsertTable('taxes', namedPayload('taxes', shop.taxes.filter((row) => row.isActive), tenantId, now).map(stripUndef));
+    await upsertTable('discounts', namedPayload('discounts', shop.discounts.filter((row) => row.isActive), tenantId, now).map(stripUndef));
+    await upsertTable('additions', namedPayload('additions', shop.additions.filter((row) => row.isActive), tenantId, now).map(stripUndef));
     await upsertTable(
       'customers',
-      shop.customers.map((row) => ({
+      shop.customers
+        .filter((row) => row.isActive && !isTombstoned('customers', row.id))
+        .map((row) => ({
         id: row.id,
         tenant_id: tenantId,
         code: row.code,
@@ -567,13 +645,15 @@ export async function pushShopToCloud() {
         credit_limit: row.creditLimit,
         is_active: row.isActive,
         created_at: now,
-        updated_at: now,
+        updated_at: row.updatedAt || now,
         deleted_at: null,
       })),
     );
     await upsertTable(
       'vendors',
-      shop.vendors.map((row) => ({
+      shop.vendors
+        .filter((row) => row.isActive && !isTombstoned('vendors', row.id))
+        .map((row) => ({
         id: row.id,
         tenant_id: tenantId,
         code: row.code,
@@ -586,7 +666,7 @@ export async function pushShopToCloud() {
         balance_type: row.balanceType,
         is_active: row.isActive,
         created_at: now,
-        updated_at: now,
+        updated_at: row.updatedAt || now,
         deleted_at: null,
       })),
     );
@@ -609,7 +689,9 @@ export async function pushShopToCloud() {
     );
     await upsertTable(
       'products',
-      shop.products.map((row) => ({
+      shop.products
+        .filter((row) => row.isActive && !isTombstoned('products', row.id))
+        .map((row) => ({
         id: row.id,
         tenant_id: tenantId,
         sku: row.sku,
@@ -628,13 +710,15 @@ export async function pushShopToCloud() {
         reorder_level: row.reorderLevel,
         is_active: row.isActive,
         created_at: now,
-        updated_at: now,
+        updated_at: row.updatedAt || now,
         deleted_at: null,
       })),
     );
     await upsertTable(
       'product_variants',
-      shop.products.flatMap((product) =>
+      shop.products
+        .filter((row) => row.isActive && !isTombstoned('products', row.id))
+        .flatMap((product) =>
         product.variants.map((row) => ({
           id: row.id,
           tenant_id: tenantId,
@@ -702,7 +786,9 @@ export async function pushShopToCloud() {
       ),
     );
 
-    const liveSales = shop.sales.filter((row) => row.voucherId);
+    const liveSales = shop.sales.filter(
+      (row) => row.voucherId && !row.deletedAt && !isTombstoned('sales', row.id),
+    );
     await upsertTable(
       'sales',
       liveSales.map((row) => ({
@@ -752,7 +838,9 @@ export async function pushShopToCloud() {
       ),
     );
 
-    const livePurchases = shop.purchases.filter((row) => row.voucherId);
+    const livePurchases = shop.purchases.filter(
+      (row) => row.voucherId && !row.deletedAt && !isTombstoned('purchases', row.id),
+    );
     await upsertTable(
       'purchases',
       livePurchases.map((row) => ({
@@ -956,7 +1044,10 @@ function schedulePush() {
   if (!cloudReady) return;
   if (pullTimer) clearTimeout(pullTimer);
   pullTimer = setTimeout(() => {
-    void pushShopToCloud().catch((err) => markRefreshError(describeError(err)));
+    void (async () => {
+      await pushTombstones();
+      await pushShopToCloud();
+    })().catch((err) => markRefreshError(describeError(err)));
   }, 1800);
 }
 
@@ -964,6 +1055,8 @@ export async function hydrateCloudSync() {
   const pulled = await AsyncStorage.getItem(PULLED_KEY);
   if (pulled) cloudReady = true;
   try {
+    await hydrateTombstones();
+    await pushTombstones();
     await pullShopFromCloud();
     lastAutoAt = Date.now();
     wasOnline = true;
@@ -977,8 +1070,10 @@ export async function hydrateCloudSync() {
 
 export async function syncShopNow() {
   try {
-    if (cloudReady) await pushShopToCloud();
+    await hydrateTombstones();
+    await pushTombstones();
     await pullShopFromCloud();
+    if (cloudReady) await pushShopToCloud();
   } catch (err) {
     const message = describeError(err);
     markRefreshError(message);

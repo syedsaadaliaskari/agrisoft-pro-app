@@ -38,6 +38,8 @@ export default function RootLayout() {
   useEffect(() => {
     void Promise.all([hydrateRbac(), hydrateVendor(), hydrateErp()]).then(async () => {
       try {
+        const { hydrateCloudAuth } = await import('@/lib/cloudAuth');
+        await hydrateCloudAuth();
         const { hydrateCloudSync, startCloudSyncScheduler } = await import('@/lib/cloudSync');
         await hydrateCloudSync();
         startCloudSyncScheduler();

@@ -195,7 +195,7 @@ export async function hydrateRbac(): Promise<void> {
     if (!raw) await persist();
     const sessionRaw = await AsyncStorage.getItem(SESSION_KEY);
     session = sessionRaw ? (JSON.parse(sessionRaw) as SessionUser) : null;
-    if (session && !store.users.some((user) => user.id === session?.id && user.isActive)) {
+    if (session && !session.id.startsWith('cloud:') && !store.users.some((user) => user.id === session?.id && user.isActive)) {
       session = null;
       await AsyncStorage.removeItem(SESSION_KEY);
     }
@@ -271,10 +271,37 @@ export async function signInWithPassword(username: string, password: string): Pr
   emit();
 }
 
+/** Shop staff who signed in with cloud email — Admin menus on this phone. */
+export async function startCloudShopSession(email: string) {
+  const adminRole = store.roles.find((role) => role.name === 'Admin');
+  if (!adminRole) throw new Error('Admin role is missing.');
+  const name = email.split('@')[0] || email;
+  session = {
+    id: `cloud:${email.trim().toLowerCase()}`,
+    username: email.trim().toLowerCase(),
+    fullName: nameFromEmail(name),
+    roleId: adminRole.id,
+    roleName: adminRole.name,
+    permissions: adminRole.permissionCodes,
+  };
+  await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  emit();
+}
+
+function nameFromEmail(local: string) {
+  return local.replace(/[._-]+/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase()) || 'Staff';
+}
+
 export async function signOut(): Promise<void> {
   session = null;
   await AsyncStorage.removeItem(SESSION_KEY);
   emit();
+  try {
+    const { signOutCloud } = await import('@/lib/cloudAuth');
+    await signOutCloud();
+  } catch {
+    /* cloud sign-out is best-effort */
+  }
 }
 
 export function listRoles(): RoleRow[] {

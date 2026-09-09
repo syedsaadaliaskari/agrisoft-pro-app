@@ -6,6 +6,16 @@ function readEnv(name: string): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+let memberTenantId = '';
+
+export function setMemberTenantId(id: string) {
+  memberTenantId = id.trim();
+}
+
+export function getMemberTenantId() {
+  return memberTenantId;
+}
+
 export type AppConfig = {
   supabaseUrl: string;
   anonKey: string;
@@ -17,7 +27,8 @@ export type AppConfig = {
 export function getAppConfig(): AppConfig {
   const supabaseUrl = readEnv('EXPO_PUBLIC_SUPABASE_URL') || DEFAULT_URL;
   const anonKey = readEnv('EXPO_PUBLIC_SUPABASE_ANON_KEY');
-  const tenantId = readEnv('EXPO_PUBLIC_TENANT_ID') || DEFAULT_TENANT_ID;
+  const envTenant = readEnv('EXPO_PUBLIC_TENANT_ID') || DEFAULT_TENANT_ID;
+  const tenantId = memberTenantId || envTenant;
 
   return {
     supabaseUrl,

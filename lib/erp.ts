@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { newId } from '@/lib/id';
+import { rememberDeleted } from '@/lib/tombstones';
 
 export type PaymentMode = 'cash' | 'credit' | 'bank';
 export type AmountType = 'percent' | 'fixed';
@@ -52,6 +53,7 @@ export type Party = {
   balanceType: 'debit' | 'credit';
   creditLimit: number;
   isActive: boolean;
+  updatedAt?: string;
 };
 
 export type Variant = {
@@ -83,6 +85,7 @@ export type Product = {
   taxId: string | null;
   reorderLevel: number;
   isActive: boolean;
+  updatedAt?: string;
   variants: Variant[];
 };
 
@@ -133,6 +136,7 @@ export type SaleDoc = {
   status: 'posted' | 'cancelled';
   items: DocLine[];
   deletedAt: string | null;
+  updatedAt?: string;
 };
 
 export type PurchaseDoc = {
@@ -153,6 +157,7 @@ export type PurchaseDoc = {
   status: 'posted' | 'cancelled';
   items: DocLine[];
   deletedAt: string | null;
+  updatedAt?: string;
 };
 
 export type ReturnDoc = {
@@ -436,6 +441,7 @@ function cancelLinkedVoucher(type: VoucherType, referenceNo: string) {
   for (const row of store.vouchers) {
     if (row.voucherType === type && row.referenceNo === referenceNo && row.status === 'posted') {
       row.status = 'cancelled';
+      rememberDeleted('vouchers', row.id);
     }
   }
 }
@@ -456,13 +462,19 @@ function migrateStore() {
     party.email = party.email ?? '';
     party.balanceType = party.balanceType ?? 'debit';
     party.creditLimit = party.creditLimit ?? 0;
+    if (!party.isActive) rememberDeleted('customers', party.id);
   }
   for (const party of store.vendors) {
     party.email = party.email ?? '';
     party.balanceType = party.balanceType ?? 'credit';
     party.creditLimit = party.creditLimit ?? 0;
+    if (!party.isActive) rememberDeleted('vendors', party.id);
   }
   for (const product of store.products) {
+    if (!product.isActive) {
+      rememberDeleted('products', product.id);
+      for (const variant of product.variants ?? []) rememberDeleted('product_variants', variant.id);
+    }
     product.barcode = product.barcode ?? '';
     product.description = product.description ?? '';
     product.gender = product.gender ?? '';
@@ -492,6 +504,11 @@ function migrateStore() {
           },
         ];
   }
+  for (const table of ['units', 'categories', 'taxes', 'discounts', 'additions'] as const) {
+    for (const row of store[table]) {
+      if (!row.isActive) rememberDeleted(table, row.id);
+    }
+  }
   const fillDoc = (doc: SaleDoc | PurchaseDoc) => {
     doc.voucherId = doc.voucherId ?? null;
     doc.subtotal = doc.subtotal ?? doc.grandTotal;
@@ -507,6 +524,12 @@ function migrateStore() {
   };
   store.sales.forEach(fillDoc);
   store.purchases.forEach(fillDoc);
+  for (const sale of store.sales) {
+    if (sale.deletedAt) rememberDeleted('sales', sale.id);
+  }
+  for (const purchase of store.purchases) {
+    if (purchase.deletedAt) rememberDeleted('purchases', purchase.id);
+  }
   for (const row of store.saleReturns) {
     row.voucherId = row.voucherId ?? null;
     for (const line of row.items) line.id = line.id || newId();
@@ -697,6 +720,7 @@ export async function removeNamed(
 ) {
   const row = store[table].find((r) => r.id === id);
   if (row) row.isActive = false;
+  rememberDeleted(table, id);
   audit(table, 'delete', row?.name ?? id);
   await persist();
   emit();
@@ -718,6 +742,7 @@ async function upsertParty(kind: 'customers' | 'vendors', input: Partial<Party> 
     balanceType: input.balanceType ?? existing?.balanceType ?? (kind === 'vendors' ? 'credit' : 'debit'),
     creditLimit: input.creditLimit ?? existing?.creditLimit ?? 0,
     isActive: input.isActive ?? existing?.isActive ?? true,
+    updatedAt: now(),
   };
   if (existing) Object.assign(existing, row);
   else store[kind].push(row);
@@ -734,6 +759,7 @@ export async function removeParty(kind: 'customers' | 'vendors', id: string) {
   const row = store[kind].find((r) => r.id === id);
   if (!row) return;
   row.isActive = false;
+  rememberDeleted(kind, id);
   audit(kind, 'delete', row.name);
   await persist();
   emit();
@@ -804,6 +830,7 @@ export async function saveProduct(input: {
     taxId: input.taxId ?? existing?.taxId ?? null,
     reorderLevel: input.reorderLevel ?? existing?.reorderLevel ?? 5,
     isActive: input.isActive ?? existing?.isActive ?? true,
+    updatedAt: now(),
     variants: variants.map((variant) => ({ ...variant, productId: existing?.id ?? '' })),
   };
   row.variants.forEach((variant) => {
@@ -821,6 +848,8 @@ export async function removeProduct(id: string) {
   const row = store.products.find((r) => r.id === id);
   if (!row) return;
   row.isActive = false;
+  rememberDeleted('products', id);
+  for (const variant of row.variants) rememberDeleted('product_variants', variant.id);
   audit('products', 'delete', row.name);
   await persist();
   emit();
@@ -920,6 +949,7 @@ export async function createSale(input: {
     status: 'posted',
     items,
     deletedAt: null,
+    updatedAt: now(),
   };
   store.sales.unshift(doc);
   audit('sales', 'create', doc.invoiceNo);
@@ -959,6 +989,7 @@ export async function updateSale(
       ...totals,
       notes: input.notes ?? '',
       items,
+      updatedAt: now(),
     });
     cancelLinkedVoucher('sale', sale.invoiceNo);
     const voucher = postVoucher({
@@ -1034,6 +1065,7 @@ export async function createPurchase(input: {
     status: 'posted',
     items,
     deletedAt: null,
+    updatedAt: now(),
   };
   store.purchases.unshift(doc);
   audit('purchases', 'create', doc.invoiceNo);
@@ -1074,6 +1106,7 @@ export async function updatePurchase(
       ...totals,
       notes: input.notes ?? '',
       items,
+      updatedAt: now(),
     });
     cancelLinkedVoucher('purchase', purchase.invoiceNo);
     const voucher = postVoucher({
@@ -1373,6 +1406,7 @@ export async function cancelVoucher(id: string) {
   const row = store.vouchers.find((v) => v.id === id);
   if (!row || row.status === 'cancelled') return;
   row.status = 'cancelled';
+  rememberDeleted('vouchers', row.id);
   audit('transactions', 'cancel', row.voucherNo);
   await persist();
   emit();
@@ -1383,6 +1417,9 @@ export async function cancelSale(id: string) {
   if (!sale || sale.status === 'cancelled') return;
   sale.status = 'cancelled';
   sale.deletedAt = now();
+  sale.updatedAt = now();
+  rememberDeleted('sales', sale.id);
+  if (sale.voucherId) rememberDeleted('vouchers', sale.voucherId);
   for (const line of sale.items) bumpStock(line.variantId, line.quantity);
   cancelLinkedVoucher('sale', sale.invoiceNo);
   audit('sales', 'delete', sale.invoiceNo);
@@ -1395,6 +1432,9 @@ export async function cancelPurchase(id: string) {
   if (!purchase || purchase.status === 'cancelled') return;
   purchase.status = 'cancelled';
   purchase.deletedAt = now();
+  purchase.updatedAt = now();
+  rememberDeleted('purchases', purchase.id);
+  if (purchase.voucherId) rememberDeleted('vouchers', purchase.voucherId);
   for (const line of purchase.items) bumpStock(line.variantId, -line.quantity);
   cancelLinkedVoucher('purchase', purchase.invoiceNo);
   audit('purchases', 'delete', purchase.invoiceNo);

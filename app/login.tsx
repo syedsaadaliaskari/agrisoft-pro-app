@@ -1,20 +1,23 @@
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppLogo } from '@/components/AppLogo';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { font, radius, tokens, typeScale } from '@/constants/theme';
+import { createShopAccount, signInShopAccount } from '@/lib/cloudAuth';
 import { getSession, signInWithPassword } from '@/lib/rbac';
 
 export default function LoginScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const router = useRouter();
-  const [username, setUsername] = useState('');
+  const [mode, setMode] = useState<'signin' | 'create'>('signin');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [shopCode, setShopCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -22,12 +25,33 @@ export default function LoginScreen() {
     return <Redirect href="/" />;
   }
 
+  const afterCloud = async () => {
+    try {
+      const { hydrateCloudSync, startCloudSyncScheduler } = await import('@/lib/cloudSync');
+      await hydrateCloudSync();
+      startCloudSyncScheduler();
+    } catch {
+      /* offline is fine */
+    }
+    router.replace('/');
+  };
+
   const submit = async () => {
     setBusy(true);
     setError(null);
     try {
-      await signInWithPassword(username, password);
-      router.replace('/');
+      const identifier = email.trim();
+      if (!identifier.includes('@')) {
+        await signInWithPassword(identifier, password);
+        router.replace('/');
+        return;
+      }
+      if (mode === 'create') {
+        await createShopAccount({ email: identifier, password, shopCode });
+      } else {
+        await signInShopAccount({ email: identifier, password, shopCode });
+      }
+      await afterCloud();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't sign in.");
     } finally {
@@ -37,40 +61,67 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
-      <AppLogo size={80} />
-      <Text style={[styles.title, { color: colors.text }]}>Agri Soft Pro</Text>
-      <Text style={[styles.sub, { color: colors.muted }]}>Sign in</Text>
-      <TextInput
-        value={username}
-        onChangeText={setUsername}
-        autoCapitalize="none"
-        placeholder="Username"
-        placeholderTextColor={colors.muted}
-        style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
-      />
-      <TextInput
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        placeholder="Password"
-        placeholderTextColor={colors.muted}
-        style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
-      />
-      {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
-      <Pressable
-        onPress={() => void submit()}
-        disabled={busy}
-        style={[styles.button, { backgroundColor: colors.tint, opacity: busy ? 0.5 : 1 }]}>
-        <Text style={styles.buttonText}>{busy ? 'Please wait…' : 'Sign in'}</Text>
-      </Pressable>
+      <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
+        <AppLogo size={80} />
+        <Text style={[styles.title, { color: colors.text }]}>Agri Soft Pro</Text>
+        <Text style={[styles.sub, { color: colors.muted }]}>
+          {mode === 'create' ? 'Create account' : 'Sign in'}
+        </Text>
+        <Pressable onPress={() => setMode(mode === 'create' ? 'signin' : 'create')}>
+          <Text style={[styles.switch, { color: colors.tint }]}>
+            {mode === 'create' ? 'Already have an account? Sign in' : 'New on this phone? Create account'}
+          </Text>
+        </Pressable>
+        <TextInput
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoComplete="email"
+          keyboardType="email-address"
+          placeholder="Email"
+          placeholderTextColor={colors.muted}
+          style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+        />
+        <TextInput
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          placeholder="Password"
+          placeholderTextColor={colors.muted}
+          style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+        />
+        <TextInput
+          value={shopCode}
+          onChangeText={setShopCode}
+          autoCapitalize="none"
+          placeholder={mode === 'create' ? 'Shop code (from the owner / PC)' : 'Shop code (first time only)'}
+          placeholderTextColor={colors.muted}
+          style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+        />
+        <Text style={[styles.hint, { color: colors.muted }]}>
+          Shop code is the shop’s cloud id. The owner gives it to you once. After that, only email and password.
+        </Text>
+        {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
+        <Pressable
+          onPress={() => void submit()}
+          disabled={busy}
+          style={[styles.button, { backgroundColor: colors.tint, opacity: busy ? 0.5 : 1 }]}>
+          <Text style={styles.buttonText}>
+            {busy ? 'Please wait…' : mode === 'create' ? 'Create account' : 'Sign in'}
+          </Text>
+        </Pressable>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
+  screen: { flex: 1, backgroundColor: tokens.bg },
+  inner: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
   title: { ...font, fontSize: 26, fontWeight: '600', marginTop: 8 },
-  sub: { ...font, fontSize: typeScale.body, marginBottom: 8 },
+  sub: { ...font, fontSize: typeScale.body },
+  switch: { ...font, fontSize: typeScale.label, fontWeight: '600', marginBottom: 4 },
+  hint: { ...font, fontSize: typeScale.label, textAlign: 'center', maxWidth: 360 },
   input: {
     ...font,
     width: '100%',
@@ -82,7 +133,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     fontSize: typeScale.body,
   },
-  error: { ...font, fontSize: typeScale.label, fontWeight: '500' },
+  error: { ...font, fontSize: typeScale.label, fontWeight: '500', textAlign: 'center', maxWidth: 360 },
   button: {
     marginTop: 8,
     minHeight: 44,

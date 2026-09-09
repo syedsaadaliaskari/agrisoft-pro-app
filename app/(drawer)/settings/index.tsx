@@ -7,6 +7,7 @@ import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { getSettings, saveSettings, subscribeErp } from '@/lib/erp';
+import { getAppConfig } from '@/lib/config';
 import { syncShopNow } from '@/lib/cloudSync';
 import { formatWhen } from '@/lib/format';
 import { getSyncStatus, subscribeSyncStatus } from '@/lib/syncStatus';
@@ -75,7 +76,10 @@ export default function SettingsScreen() {
           </Card>
           <Card title="Cloud">
             <Text style={{ color: colors.muted }}>
-              Updates by itself when this phone is online — when you open the app, when Wi‑Fi comes back, and about every 15 minutes while it stays open. Same idea as the shop PC.
+              Shop code (give this to staff once when they Create account): {getAppConfig().tenantId}
+            </Text>
+            <Text style={{ color: colors.muted }}>
+              Updates by itself when this phone is online — when you open the app, when Wi‑Fi comes back, and about every 15 minutes while it stays open. A delete on this phone is sent to the cloud as soon as there is internet.
             </Text>
             <Text style={{ color: colors.muted }}>
               Last sync {formatWhen(sync.lastRefreshAt)}
