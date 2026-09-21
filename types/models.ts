@@ -57,7 +57,7 @@ export type SaleItem = {
   color?: string | null;
 };
 
-export type PaymentMode = 'cash' | 'credit' | 'bank';
+export type PaymentMode = 'cash' | 'credit' | 'bank' | 'split';
 
 export type CreateSaleLine = {
   variantId: string;

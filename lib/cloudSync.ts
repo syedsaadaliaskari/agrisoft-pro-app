@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 
-import { getAppConfig } from '@/lib/config';
+import { getAppConfig, getMemberTenantId } from '@/lib/config';
 import {
   applyCloudSnapshot,
   getShopSnapshot,
@@ -21,7 +21,7 @@ import {
 } from '@/lib/erp';
 import { newId } from '@/lib/id';
 import { getSupabase } from '@/lib/supabase';
-import { markRefreshError, markRefreshSuccess } from '@/lib/syncStatus';
+import { markOffline, markPendingPush, markRefreshError, markRefreshSuccess, getSyncStatus } from '@/lib/syncStatus';
 import {
   dropTombstones,
   hydrateTombstones,
@@ -61,8 +61,9 @@ function describeError(error: unknown, fallback = "Couldn't sync with the cloud.
 
 function requireCloud() {
   const client = getSupabase();
-  const { tenantId, isReady } = getAppConfig();
-  if (!client || !isReady) throw new Error("Couldn't reach the cloud.");
+  const tenantId = getMemberTenantId();
+  if (!client) throw new Error("Couldn't reach the cloud.");
+  if (!tenantId) throw new Error('Sign in with your shop code.');
   return { client, tenantId };
 }
 
@@ -107,23 +108,6 @@ async function pushTombstones() {
     done.push(row);
   }
   await dropTombstones(done);
-}
-
-function keepLocalOnly<T extends { id: string }>(
-  local: T[],
-  remote: T[],
-  table: ShopTable,
-  updatedAt: (row: T) => string | undefined,
-  lastPull: string | null,
-) {
-  const remoteIds = new Set(remote.map((row) => row.id));
-  return local.filter((row) => {
-    if (remoteIds.has(row.id) || isTombstoned(table, row.id)) return false;
-    const at = updatedAt(row);
-    if (!at) return false;
-    if (!lastPull) return true;
-    return at > lastPull;
-  });
 }
 
 function namedFrom(
@@ -186,9 +170,15 @@ function partyFrom(
 }
 
 export async function pullShopFromCloud() {
+  if (cloudReady && getSyncStatus().pendingPush) {
+    try {
+      await pushShopToCloud();
+    } catch {
+      return;
+    }
+    if (getSyncStatus().pendingPush) return;
+  }
   const { tenantId } = requireCloud();
-  const local = getShopSnapshot();
-  const lastPull = await AsyncStorage.getItem(LAST_PULL_KEY);
   const [
     settings,
     units,
@@ -511,27 +501,12 @@ export async function pullShopFromCloud() {
     taxes: namedFrom(taxes),
     discounts: namedFrom(discounts),
     additions: namedFrom(additions),
-    customers: [
-      ...remoteCustomers,
-      ...keepLocalOnly(local.customers, remoteCustomers, 'customers', (row) => row.updatedAt, lastPull),
-    ],
-    vendors: [
-      ...remoteVendors,
-      ...keepLocalOnly(local.vendors, remoteVendors, 'vendors', (row) => row.updatedAt, lastPull),
-    ],
-    products: [
-      ...remoteProducts,
-      ...keepLocalOnly(local.products, remoteProducts, 'products', (row) => row.updatedAt, lastPull),
-    ],
+    customers: remoteCustomers,
+    vendors: remoteVendors,
+    products: remoteProducts,
     accounts: mappedAccounts,
-    sales: [
-      ...remoteSales,
-      ...keepLocalOnly(local.sales, remoteSales, 'sales', (row) => row.updatedAt, lastPull),
-    ],
-    purchases: [
-      ...remotePurchases,
-      ...keepLocalOnly(local.purchases, remotePurchases, 'purchases', (row) => row.updatedAt, lastPull),
-    ],
+    sales: remoteSales,
+    purchases: remotePurchases,
     saleReturns: mappedSaleReturns,
     purchaseReturns: mappedPurchaseReturns,
     vouchers: mappedVouchers,
@@ -549,7 +524,7 @@ export async function pullShopFromCloud() {
   cloudReady = true;
   await AsyncStorage.setItem(PULLED_KEY, '1');
   await AsyncStorage.setItem(LAST_PULL_KEY, stamp());
-  setErpPersistHook(schedulePush);
+  setErpPersistHook(onLocalChange);
   markRefreshSuccess({
     customerCount: remoteCustomers.length,
     productCount: remoteProducts.length,
@@ -1040,6 +1015,11 @@ export async function pushShopToCloud() {
   }
 }
 
+function onLocalChange() {
+  markPendingPush();
+  schedulePush();
+}
+
 function schedulePush() {
   if (!cloudReady) return;
   if (pullTimer) clearTimeout(pullTimer);
@@ -1047,16 +1027,43 @@ function schedulePush() {
     void (async () => {
       await pushTombstones();
       await pushShopToCloud();
-    })().catch((err) => markRefreshError(describeError(err)));
+    })().catch((err) => {
+      const message = describeError(err);
+      if (/offline/i.test(message)) markOffline();
+      else markRefreshError(message);
+    });
   }, 1800);
 }
 
+export async function resetCloudPullState() {
+  cloudReady = false;
+  if (pullTimer) {
+    clearTimeout(pullTimer);
+    pullTimer = null;
+  }
+  await AsyncStorage.removeItem(PULLED_KEY);
+  await AsyncStorage.removeItem(LAST_PULL_KEY);
+}
+
+/** Drop leftover phone rows, then pull this shop from the cloud. */
+export async function reloadShopFromCloud() {
+  const { resetLocalShopBooks } = await import('@/lib/erp');
+  const { clearTombstones } = await import('@/lib/tombstones');
+  await resetLocalShopBooks();
+  await resetCloudPullState();
+  await clearTombstones();
+  await pullShopFromCloud();
+}
+
 export async function hydrateCloudSync() {
+  if (!getMemberTenantId()) return;
   const pulled = await AsyncStorage.getItem(PULLED_KEY);
   if (pulled) cloudReady = true;
+  setErpPersistHook(onLocalChange);
   try {
     await hydrateTombstones();
     await pushTombstones();
+    if (cloudReady) await pushShopToCloud();
     await pullShopFromCloud();
     lastAutoAt = Date.now();
     wasOnline = true;
@@ -1064,16 +1071,16 @@ export async function hydrateCloudSync() {
     const message = describeError(err);
     markRefreshError(message);
     if (/offline/i.test(message)) wasOnline = false;
-    if (cloudReady) setErpPersistHook(schedulePush);
   }
 }
 
 export async function syncShopNow() {
+  if (!getMemberTenantId()) throw new Error('Sign in with your shop code.');
   try {
     await hydrateTombstones();
     await pushTombstones();
-    await pullShopFromCloud();
     if (cloudReady) await pushShopToCloud();
+    await pullShopFromCloud();
   } catch (err) {
     const message = describeError(err);
     markRefreshError(message);
@@ -1092,6 +1099,7 @@ let schedulerStarted = false;
 let appStateSub: { remove: () => void } | null = null;
 
 async function isCloudReachable(): Promise<boolean> {
+  if (!getMemberTenantId()) return false;
   try {
     const { client } = requireCloud();
     const { error } = await client.from('tenants').select('id').limit(1);
@@ -1108,7 +1116,7 @@ async function isCloudReachable(): Promise<boolean> {
 
 /** Same idea as desktop: when the app is open and the net is back, books refresh without tapping Sync. */
 export async function maybeAutoSync(options?: { force?: boolean }) {
-  if (!getAppConfig().isReady) return;
+  if (!getMemberTenantId() || !getAppConfig().isReady) return;
   if (autoSyncing) return;
   if (!options?.force && Date.now() - lastAutoAt < MIN_GAP_MS) return;
   if (!(await isCloudReachable())) return;

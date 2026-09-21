@@ -7,12 +7,12 @@ import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { getSettings, saveSettings, subscribeErp } from '@/lib/erp';
-import { getAppConfig } from '@/lib/config';
 import { syncShopNow } from '@/lib/cloudSync';
 import { formatWhen } from '@/lib/format';
 import { getSyncStatus, subscribeSyncStatus } from '@/lib/syncStatus';
 import { isSuperAdminUser } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
+import { getLocale, setLocale, subscribeLocale, t, type Locale } from '@/lib/i18n';
 
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -22,9 +22,11 @@ export default function SettingsScreen() {
   useEffect(() => {
     const a = subscribeErp(() => tick((n) => n + 1));
     const b = subscribeSyncStatus(() => tick((n) => n + 1));
+    const c = subscribeLocale(() => tick((n) => n + 1));
     return () => {
       a();
       b();
+      c();
     };
   }, []);
   const current = getSettings();
@@ -49,7 +51,7 @@ export default function SettingsScreen() {
           </Card>
         ) : (
           <>
-          <Card title="Shop">
+          <Card title={t('settings.shop')}>
             <Field label="Shop name" value={shop_name} onChangeText={setName} />
             <Field label="Phone" value={shop_phone} onChangeText={setPhone} keyboardType="phone-pad" />
             <Field label="Address" value={shop_address} onChangeText={setAddress} />
@@ -65,7 +67,7 @@ export default function SettingsScreen() {
             <Field label="Receipt footer" value={receipt_footer} onChangeText={setFooter} />
             {ok ? <Text style={{ color: colors.tint, fontWeight: '700' }}>{ok}</Text> : null}
             <PrimaryButton
-              label="Save settings"
+              label={t('settings.save')}
               color={colors.tint}
               onPress={async () => {
                 await saveSettings({ shop_name, shop_phone, shop_address, currency_symbol, tax_mode, receipt_footer });
@@ -74,22 +76,32 @@ export default function SettingsScreen() {
             />
             <Text style={{ color: colors.muted }}>Signed in as {user?.fullName} ({user?.roleName})</Text>
           </Card>
-          <Card title="Cloud">
-            <Text style={{ color: colors.muted }}>
-              Shop code (give this to staff once when they Create account): {getAppConfig().tenantId}
-            </Text>
-            <Text style={{ color: colors.muted }}>
-              Updates by itself when this phone is online — when you open the app, when Wi‑Fi comes back, and about every 15 minutes while it stays open. A delete on this phone is sent to the cloud as soon as there is internet.
-            </Text>
+          <Card title={t('settings.language')}>
+            <Chips
+              value={getLocale()}
+              onChange={(next) => void setLocale(next as Locale)}
+              options={[
+                { value: 'en', label: t('lang.english') },
+                { value: 'ur', label: t('lang.urdu') },
+              ]}
+            />
+          </Card>
+          <Card title={t('settings.sync')}>
             <Text style={{ color: colors.muted }}>
               Last sync {formatWhen(sync.lastRefreshAt)}
               {sync.customerCount != null ? ` · ${sync.customerCount} customers` : ''}
               {sync.productCount != null ? ` · ${sync.productCount} products` : ''}
               {sync.saleCount != null ? ` · ${sync.saleCount} sales` : ''}
             </Text>
-            {sync.lastError ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{sync.lastError}</Text> : null}
+            {sync.isOffline ? (
+              <Text style={{ color: colors.muted }}>{t('home.offline')}</Text>
+            ) : sync.pendingPush ? (
+              <Text style={{ color: colors.warning, fontWeight: '700' }}>{t('home.pending')}</Text>
+            ) : sync.lastError ? (
+              <Text style={{ color: colors.danger, fontWeight: '700' }}>{sync.lastError}</Text>
+            ) : null}
             <PrimaryButton
-              label={syncBusy ? 'Syncing…' : 'Sync now'}
+              label={syncBusy ? t('settings.syncing') : t('settings.syncNow')}
               tone="ghost"
               color={colors.tint}
               disabled={syncBusy}
@@ -98,7 +110,7 @@ export default function SettingsScreen() {
                 setOk(null);
                 try {
                   await syncShopNow();
-                  setOk('Cloud books updated.');
+                  setOk('Synced.');
                 } catch (err) {
                   setOk(err instanceof Error ? err.message : "Couldn't sync.");
                 } finally {

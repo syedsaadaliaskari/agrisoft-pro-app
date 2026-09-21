@@ -16,7 +16,7 @@ function describeAuthError(error: unknown, fallback: string) {
   if (error && typeof error === 'object' && 'message' in error) {
     const message = String((error as { message?: string }).message ?? '');
     if (/email not confirmed/i.test(message)) {
-      return 'Confirm your email, or in Supabase turn off Confirm email under Authentication → Providers → Email.';
+      return 'Confirm your email, then sign in.';
     }
     if (/invalid login/i.test(message)) return 'Wrong email or password.';
     if (/already registered/i.test(message)) return 'That email already has an account. Sign in instead.';
@@ -33,12 +33,18 @@ export async function joinShop(shopCode: string) {
   const { data, error } = await client.rpc('join_shop', { shop_code: code });
   if (error) {
     const message = error.message || '';
-    if (/unknown shop/i.test(message) || /not found/i.test(message)) {
-      throw new Error('That shop code was not found. Ask the shop owner for the code from the PC.');
+    if (/unknown shop/i.test(message) || /not found/i.test(message) || /not valid/i.test(message)) {
+      throw new Error('That shop code was not found.');
     }
     throw new Error(describeAuthError(error, "Couldn't join that shop."));
   }
-  const tenantId = typeof data === 'string' ? data : code;
+  const tenantId = typeof data === 'string' && data.trim() ? data.trim() : code;
+  const { resetLocalShopBooks } = await import('@/lib/erp');
+  const { resetCloudPullState } = await import('@/lib/cloudSync');
+  const { clearTombstones } = await import('@/lib/tombstones');
+  await resetLocalShopBooks();
+  await resetCloudPullState();
+  await clearTombstones();
   await rememberTenant(tenantId);
   return tenantId;
 }
@@ -48,7 +54,12 @@ export async function loadMembership(): Promise<string> {
   const { data: userData } = await client.auth.getUser();
   const userId = userData.user?.id;
   if (!userId) return '';
-  const { data, error } = await client.from('tenant_members').select('tenant_id').eq('user_id', userId).limit(1);
+  const { data, error } = await client
+    .from('tenant_members')
+    .select('tenant_id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1);
   if (error) throw new Error(describeAuthError(error, "Couldn't load your shop."));
   const tenantId = data?.[0]?.tenant_id ? String(data[0].tenant_id) : '';
   if (tenantId) await rememberTenant(tenantId);
@@ -86,7 +97,7 @@ export async function createShopAccount(input: { email: string; password: string
   if (error) throw new Error(describeAuthError(error, "Couldn't create the account."));
   if (!data.session) {
     throw new Error(
-      'Account created. In Supabase: Authentication → Providers → Email → turn off Confirm email. Then Sign in and enter the shop code.',
+      'Account created. Confirm your email if asked, then sign in.',
     );
   }
   await joinShop(shopCode);
@@ -103,12 +114,9 @@ export async function signInShopAccount(input: { email: string; password: string
   const { error } = await client.auth.signInWithPassword({ email, password });
   if (error) throw new Error(describeAuthError(error, "Couldn't sign in."));
 
-  let tenantId = await loadMembership();
   const code = input.shopCode?.trim() || '';
-  if (!tenantId) {
-    if (!code) throw new Error('First time on this phone: enter the shop code the owner gave you.');
-    tenantId = await joinShop(code);
-  }
+  if (!code) throw new Error('Enter the shop code.');
+  const tenantId = await joinShop(code);
   await startCloudShopSession(email);
   return tenantId;
 }
@@ -116,6 +124,16 @@ export async function signInShopAccount(input: { email: string; password: string
 export async function signOutCloud() {
   setMemberTenantId('');
   await AsyncStorage.removeItem(TENANT_KEY);
+  try {
+    const { resetLocalShopBooks } = await import('@/lib/erp');
+    const { resetCloudPullState } = await import('@/lib/cloudSync');
+    const { clearTombstones } = await import('@/lib/tombstones');
+    await resetLocalShopBooks();
+    await resetCloudPullState();
+    await clearTombstones();
+  } catch {
+    /* local wipe is best-effort */
+  }
   const client = getSupabase();
   if (client) await client.auth.signOut();
 }

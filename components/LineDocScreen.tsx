@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 
-import { Card, Chips, Field, PickRow, TotalRow } from '@/components/FormKit';
+import { Card, Field, PickRow, TotalRow } from '@/components/FormKit';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { SettlementPad } from '@/components/SettlementPad';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import {
@@ -24,12 +25,27 @@ import {
   updateSale,
   type PaymentMode,
 } from '@/lib/erp';
+import { moneyRound } from '@/lib/settlement';
+import { printHtml, purchasePrintHtml, salePrintHtml } from '@/lib/print';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
 type Cart = { variantId: string; name: string; quantity: number; unitPrice: number };
+
+function seedPay(existing: { cashPaid?: number; bankPaid?: number; paidAmount: number; paymentMode: PaymentMode } | null, kind: 'sale' | 'purchase') {
+  if (!existing) {
+    return kind === 'sale'
+      ? { cash: '', bank: '0', how: 'cash' as PaymentMode }
+      : { cash: '0', bank: '0', how: 'credit' as PaymentMode };
+  }
+  return {
+    cash: String(existing.cashPaid ?? (existing.paymentMode === 'bank' || existing.paymentMode === 'credit' ? 0 : existing.paidAmount)),
+    bank: String(existing.bankPaid ?? (existing.paymentMode === 'bank' ? existing.paidAmount : 0)),
+    how: existing.paymentMode,
+  };
+}
 
 export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; editId?: string }) {
   const scheme = useColorScheme() ?? 'light';
@@ -50,12 +66,14 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
       ? ((existing && 'customerId' in existing ? existing.customerId : '') ?? '')
       : ((existing && 'vendorId' in existing ? existing.vendorId : '') ?? ''),
   );
-  const [mode, setMode] = useState<PaymentMode>(existing?.paymentMode ?? (kind === 'sale' ? 'cash' : 'credit'));
+  const [mode] = useState<PaymentMode>(existing?.paymentMode ?? (kind === 'sale' ? 'cash' : 'credit'));
+  const seeded = seedPay(existing, kind);
+  const [cashPaid, setCashPaid] = useState(seeded.cash);
+  const [bankPaid, setBankPaid] = useState(seeded.bank);
   const [notes, setNotes] = useState(existing?.notes ?? '');
   const [discount, setDiscount] = useState(String(existing?.discountAmount ?? 0));
   const [addition, setAddition] = useState(String(existing?.additionAmount ?? 0));
   const [tax, setTax] = useState(String(existing?.taxAmount ?? 0));
-  const [paid, setPaid] = useState(existing ? String(existing.paidAmount) : '');
   const [cart, setCart] = useState<Cart[]>(
     existing?.items.map((line) => ({
       variantId: line.variantId,
@@ -68,17 +86,31 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
   const [error, setError] = useState<string | null>(null);
 
   const subtotal = cart.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-  const totals = useMemo(
-    () =>
-      computeDocTotals(subtotal, {
-        discountAmount: Number(discount) || 0,
-        additionAmount: Number(addition) || 0,
-        taxAmount: Number(tax) || 0,
-        paidAmount: paid === '' ? undefined : Number(paid) || 0,
+  const totals = useMemo(() => {
+    const extra = {
+      discountAmount: Number(discount) || 0,
+      additionAmount: Number(addition) || 0,
+      taxAmount: Number(tax) || 0,
+      cashPaid: Number(cashPaid || 0),
+      bankPaid: Number(bankPaid || 0),
+    };
+    try {
+      return computeDocTotals(subtotal, extra);
+    } catch {
+      const grandTotal = Math.max(
+        0,
+        moneyRound(subtotal - extra.discountAmount + extra.additionAmount + extra.taxAmount),
+      );
+      return {
+        subtotal,
+        ...extra,
+        grandTotal,
+        paidAmount: extra.cashPaid + extra.bankPaid,
+        due: Math.max(0, moneyRound(grandTotal - extra.cashPaid - extra.bankPaid)),
         paymentMode: mode,
-      }),
-    [subtotal, discount, addition, tax, paid, mode],
-  );
+      };
+    }
+  }, [subtotal, discount, addition, tax, cashPaid, bankPaid, mode]);
 
   const add = (row: (typeof stock)[number]) => {
     setCart((cur) => {
@@ -109,13 +141,33 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
 
   const payload = {
     invoiceDate: date,
-    paymentMode: mode,
     notes,
     discountAmount: totals.discountAmount,
     additionAmount: totals.additionAmount,
     taxAmount: totals.taxAmount,
-    paidAmount: totals.paidAmount,
+    cashPaid: Number(cashPaid || 0),
+    bankPaid: Number(bankPaid || 0),
     items: cart.map((l) => ({ variantId: l.variantId, quantity: l.quantity, unitPrice: l.unitPrice })),
+  };
+
+  const save = async (andShare: boolean) => {
+    setError(null);
+    try {
+      if (kind === 'sale') {
+        const doc = editId
+          ? await updateSale(editId, { ...payload, customerId: partyId || null })
+          : await createSale({ ...payload, customerId: partyId || null });
+        if (andShare) await printHtml(salePrintHtml(doc, 'thermal'), doc.invoiceNo);
+      } else {
+        const doc = editId
+          ? await updatePurchase(editId, { ...payload, vendorId: partyId || null })
+          : await createPurchase({ ...payload, vendorId: partyId || null });
+        if (andShare) await printHtml(purchasePrintHtml(doc, 'thermal'), doc.invoiceNo);
+      }
+      router.back();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save.");
+    }
   };
 
   return (
@@ -130,16 +182,6 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
             label={kind === 'sale' ? 'Customer' : 'Vendor'}
             selected={parties.find((p) => p.id === partyId)?.name ?? (kind === 'sale' ? 'Walk-in' : '')}
             onPress={() => setPick('party')}
-          />
-          <Chips
-            pad
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: 'cash', label: 'Cash' },
-              { value: 'bank', label: 'Bank' },
-              { value: 'credit', label: 'Credit' },
-            ]}
           />
           <PrimaryButton label="Add item" tone="ghost" color={colors.tint} onPress={() => setPick('item')} />
           {cart.map((line) => (
@@ -166,29 +208,36 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
           <PickRow label="Tax" selected={money(totals.taxAmount)} onPress={() => setPick('tax')} />
           <Field label="Tax amount" value={tax} onChangeText={setTax} keyboardType="decimal-pad" />
           <TotalRow label="Grand total" value={money(totals.grandTotal)} strong />
-          <Field label="Paid" value={paid} onChangeText={setPaid} keyboardType="decimal-pad" placeholder={String(totals.paidAmount)} />
-          <TotalRow label="Balance" value={money(totals.grandTotal - totals.paidAmount)} />
+          {kind === 'sale' &&
+          cart.some((line) => {
+            const row = stock.find((s) => s.variantId === line.variantId);
+            return !!row && row.costPrice > 0 && line.unitPrice < row.costPrice;
+          }) ? (
+            <Text style={{ color: colors.danger, fontWeight: '700' }}>
+              One or more items are priced below cost.
+            </Text>
+          ) : null}
+          <SettlementPad
+            grandTotal={totals.grandTotal}
+            cashPaid={cashPaid}
+            bankPaid={bankPaid}
+            onCashPaid={setCashPaid}
+            onBankPaid={setBankPaid}
+            defaultHow={seeded.how}
+            dueLabel={kind === 'sale' ? 'Receivable' : 'Payable'}
+          />
           <Field label="Notes" value={notes} onChangeText={setNotes} multiline />
           {error ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{error}</Text> : null}
           <PrimaryButton
             label={editId ? 'Save changes' : kind === 'sale' ? 'Save sale' : 'Save purchase'}
             color={colors.tint}
-            onPress={async () => {
-              setError(null);
-              try {
-                if (kind === 'sale') {
-                  if (editId) await updateSale(editId, { ...payload, customerId: partyId || null });
-                  else await createSale({ ...payload, customerId: partyId || null });
-                } else if (editId) {
-                  await updatePurchase(editId, { ...payload, vendorId: partyId || null });
-                } else {
-                  await createPurchase({ ...payload, vendorId: partyId || null });
-                }
-                router.back();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Couldn't save.");
-              }
-            }}
+            onPress={() => void save(false)}
+          />
+          <PrimaryButton
+            label="Save & share"
+            tone="secondary"
+            color={colors.tint}
+            onPress={() => void save(true)}
           />
         </Card>
         {pick === 'party' ? (
@@ -223,8 +272,13 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
               <Pressable key={row.variantId} onPress={() => add(row)} style={{ minHeight: 48, justifyContent: 'center' }}>
                 <Text style={{ color: colors.text, fontWeight: '700' }}>{row.name}</Text>
                 <Text style={{ color: colors.muted }}>
-                  {row.detail || 'Default'} · Stock {row.stockQty} · {money(kind === 'sale' ? row.salePrice : row.costPrice)}
+                {row.detail || 'Default'} · Stock {row.stockQty} · {money(kind === 'sale' ? row.salePrice : row.costPrice)}
+              </Text>
+              {kind === 'sale' && row.costPrice > 0 && row.salePrice < row.costPrice ? (
+                <Text style={{ color: colors.danger, fontWeight: '700' }}>
+                  Sale price is below cost by {money(row.costPrice - row.salePrice)}
                 </Text>
+              ) : null}
               </Pressable>
             ))}
           </Card>

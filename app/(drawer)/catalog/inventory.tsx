@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { EmptyState } from '@/components/EmptyState';
+import { ListRow } from '@/components/ListRow';
 import { ScreenGate } from '@/components/ScreenGate';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { cardRadius, cardShadow } from '@/constants/layout';
 import { adjustStock, inventoryRows, subscribeErp } from '@/lib/erp';
 import { hasPermission } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
@@ -31,19 +31,18 @@ export default function InventoryScreen() {
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={<EmptyState title="No inventory" />}
           renderItem={({ item }) => (
-            <Pressable
-              onPress={() => {
-                if (!can) return;
-                setEdit(item);
-                setQty(String(item.stockQty));
-              }}
-              style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
-              <Text style={{ color: colors.text, fontWeight: '800' }}>{item.name}</Text>
-              <Text style={{ color: item.isLow ? colors.danger : colors.muted }}>
-                {item.detail || 'Default'} · Stock {item.stockQty}
-                {item.isLow ? ' · low' : ''}
-              </Text>
-            </Pressable>
+            <ListRow
+              title={item.name}
+              subtitle={`${item.detail || 'Default'} · Stock ${item.stockQty}${item.isLow ? ' · low' : ''}`}
+              onPress={
+                can
+                  ? () => {
+                      setEdit(item);
+                      setQty(String(item.stockQty));
+                    }
+                  : undefined
+              }
+            />
           )}
         />
         <Modal visible={!!edit} transparent animationType="fade" onRequestClose={() => setEdit(null)}>
@@ -78,7 +77,6 @@ export default function InventoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  row: { borderRadius: cardRadius, padding: 14, gap: 4 },
   backdrop: { flex: 1, backgroundColor: '#0006', justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12 },
   input: { minHeight: 48, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12 },

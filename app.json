@@ -3,7 +3,7 @@
     "name": "Agri Soft Pro",
     "slug": "agrisoft-pro",
     "owner": "syedsaadaliaskari",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "agrisoftpro",
@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.agrisoft.pro.app",
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#f3f5f8",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -42,7 +43,8 @@
         }
       ],
       "expo-sharing",
-      "expo-file-system"
+      "expo-file-system",
+      "expo-print"
     ],
     "experiments": {
       "typedRoutes": true

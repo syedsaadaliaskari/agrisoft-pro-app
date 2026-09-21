@@ -16,14 +16,27 @@ try {
       envFile[t.slice(0, i).trim()] = t.slice(i + 1).trim();
     }
   } catch {
-    /* .env optional */
+    /* .env optional if an EAS secret already exists */
   }
-  eas.build.preview.env = {
+
+  const anon = envFile.EXPO_PUBLIC_SUPABASE_ANON_KEY || "";
+  if (!anon) {
+    console.error(
+      "Missing EXPO_PUBLIC_SUPABASE_ANON_KEY. Put it in .env for this helper, or run:\n  npx eas-cli secret:create --name EXPO_PUBLIC_SUPABASE_ANON_KEY --scope project\nthen:\n  npx eas-cli build -p android --profile preview",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const env = {
     EXPO_PUBLIC_SUPABASE_URL:
       envFile.EXPO_PUBLIC_SUPABASE_URL || "https://vbyqlfxcfxijmrvilupp.supabase.co",
-    EXPO_PUBLIC_SUPABASE_ANON_KEY: envFile.EXPO_PUBLIC_SUPABASE_ANON_KEY || "",
-    EXPO_PUBLIC_TENANT_ID: envFile.EXPO_PUBLIC_TENANT_ID || "tenant-dev-001",
+    EXPO_PUBLIC_SUPABASE_ANON_KEY: anon,
   };
+  if (envFile.EXPO_PUBLIC_TENANT_ID) {
+    env.EXPO_PUBLIC_TENANT_ID = envFile.EXPO_PUBLIC_TENANT_ID;
+  }
+  eas.build.preview.env = env;
   fs.writeFileSync(easPath, JSON.stringify(eas, null, 2) + "\n");
   const r = spawnSync(
     "npx",

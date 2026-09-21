@@ -99,15 +99,33 @@ function lineRows(items: { productName: string; size?: string; color?: string; q
     .join('');
 }
 
-function totalsBlock(doc: { subtotal?: number; discountAmount?: number; additionAmount?: number; taxAmount?: number; grandTotal: number; paidAmount?: number }) {
+function totalsBlock(doc: {
+  subtotal?: number;
+  discountAmount?: number;
+  additionAmount?: number;
+  taxAmount?: number;
+  grandTotal: number;
+  paidAmount?: number;
+  cashPaid?: number;
+  bankPaid?: number;
+}) {
   const paid = doc.paidAmount ?? 0;
+  const cash = doc.cashPaid ?? 0;
+  const bank = doc.bankPaid ?? 0;
+  const due = moneyRoundSafe(doc.grandTotal - paid);
   return `<div><span>Subtotal</span><span>${moneyBits(doc.subtotal ?? doc.grandTotal)}</span></div>
     <div><span>Discount</span><span>${moneyBits(doc.discountAmount ?? 0)}</span></div>
     <div><span>Additions</span><span>${moneyBits(doc.additionAmount ?? 0)}</span></div>
     <div><span>Tax</span><span>${moneyBits(doc.taxAmount ?? 0)}</span></div>
     <div class="grand"><span>Grand total</span><span>${moneyBits(doc.grandTotal)}</span></div>
+    ${cash > 0 ? `<div><span>Cash</span><span>${moneyBits(cash)}</span></div>` : ''}
+    ${bank > 0 ? `<div><span>Bank</span><span>${moneyBits(bank)}</span></div>` : ''}
     <div><span>Paid</span><span>${moneyBits(paid)}</span></div>
-    <div><span>Balance</span><span>${moneyBits(doc.grandTotal - paid)}</span></div>`;
+    <div><span>Balance</span><span>${moneyBits(due)}</span></div>`;
+}
+
+function moneyRoundSafe(n: number) {
+  return Math.round((Number(n) || 0) * 100) / 100;
 }
 
 export function salePrintHtml(sale: SaleDoc, size: ReceiptSize = 'thermal') {

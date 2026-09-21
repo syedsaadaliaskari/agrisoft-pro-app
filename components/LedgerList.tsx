@@ -32,7 +32,7 @@ export function LedgerList({ kind }: { kind: Kind }) {
         setRows(
           filtered.map((row) => ({
             id: row.id,
-            title: `${row.code}  ${row.name}`,
+            title: row.name,
             meta: formatMoney(row.opening_balance),
           })),
         );

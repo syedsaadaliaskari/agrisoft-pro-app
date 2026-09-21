@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Href, usePathname, useRouter } from 'expo-router';
 import { DrawerContentScrollView } from 'expo-router/drawer';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppLogo } from '@/components/AppLogo';
@@ -11,6 +11,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { font, overline, typeScale } from '@/constants/theme';
 import { filterNavForUser } from '@/lib/nav';
 import { getSession, signOut } from '@/lib/rbac';
+import { subscribeLocale, t, tNav } from '@/lib/i18n';
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -21,6 +22,8 @@ export function ShopDrawerContent(props: ComponentProps<typeof DrawerContentScro
   const pathname = usePathname();
   const user = getSession();
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [, tick] = useState(0);
+  useEffect(() => subscribeLocale(() => tick((n) => n + 1)), []);
 
   const groups = useMemo(() => filterNavForUser(user), [user]);
 
@@ -29,7 +32,7 @@ export function ShopDrawerContent(props: ComponentProps<typeof DrawerContentScro
       <View style={[styles.brand, { borderBottomColor: colors.border }]}>
         <AppLogo size={36} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.brandName, { color: colors.text }]}>Agri Soft Pro</Text>
+          <Text style={[styles.brandName, { color: colors.text }]}>{t('brand.name')}</Text>
           <Text style={[styles.pro, { color: colors.tint }]}>PRO</Text>
           <Text style={[styles.brandMeta, { color: colors.muted }]}>
             {user?.fullName} · {user?.roleName}
@@ -45,7 +48,7 @@ export function ShopDrawerContent(props: ComponentProps<typeof DrawerContentScro
               onPress={() => setOpen((current) => ({ ...current, [group.title]: !expanded }))}
               style={styles.groupHead}>
               <Ionicons name={group.icon as IconName} size={16} color={colors.muted} />
-              <Text style={[styles.groupTitle, { color: colors.muted }]}>{group.title}</Text>
+              <Text style={[styles.groupTitle, { color: colors.muted }]}>{tNav(group.title)}</Text>
               <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={16} color={colors.muted} />
             </Pressable>
             {expanded
@@ -61,7 +64,7 @@ export function ShopDrawerContent(props: ComponentProps<typeof DrawerContentScro
                       ]}>
                       <Ionicons name={item.icon as IconName} size={16} color={active ? colors.tint : colors.muted} />
                       <Text style={[styles.itemLabel, { color: active ? colors.tint : colors.muted }]}>
-                        {item.label}
+                        {tNav(item.label)}
                       </Text>
                     </Pressable>
                   );
@@ -78,7 +81,7 @@ export function ShopDrawerContent(props: ComponentProps<typeof DrawerContentScro
           }}
           style={styles.logout}>
           <Ionicons name="log-out-outline" size={18} color={colors.danger} />
-          <Text style={[styles.itemLabel, { color: colors.danger }]}>Logout</Text>
+          <Text style={[styles.itemLabel, { color: colors.danger }]}>{t('topbar.logout')}</Text>
         </Pressable>
       ) : null}
     </DrawerContentScrollView>
@@ -107,7 +110,7 @@ const styles = StyleSheet.create({
   },
   groupTitle: { ...overline, flex: 1 },
   item: {
-    minHeight: 44,
+    minHeight: 48,
     marginHorizontal: 8,
     borderRadius: 8,
     paddingHorizontal: 12,

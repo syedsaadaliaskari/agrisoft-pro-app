@@ -40,9 +40,7 @@ export default function PurchaseReturnsScreen() {
                     key={bill.id}
                     onPress={() => router.push(`/return/purchase/${bill.id}` as Href)}
                     style={[styles.row, { backgroundColor: colors.tintSoft }]}>
-                    <Text style={{ color: colors.text, fontWeight: '700' }}>
-                      {bill.invoiceNo} · {bill.vendorName}
-                    </Text>
+                    <Text style={{ color: colors.text, fontWeight: '700' }}>{bill.vendorName}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -51,14 +49,14 @@ export default function PurchaseReturnsScreen() {
           ListEmptyComponent={rows.length ? null : <EmptyState title="No purchase returns" />}
           renderItem={({ item }) => (
             <View style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
-              <Text style={{ color: colors.text, fontWeight: '800' }}>{item.returnNo}</Text>
+              <Text style={{ color: colors.text, fontWeight: '800' }}>{item.partyName}</Text>
               <Text style={{ color: colors.muted }}>
-                {item.returnDate} · {item.partyName} · {money(item.grandTotal)}
+                {item.returnDate} · {money(item.grandTotal)}
               </Text>
               <ActionBar
                 actions={[
                   {
-                    label: 'Print',
+                    label: 'Share',
                     onPress: () => askPrint((size) => void printHtml(returnPrintHtml(item, 'purchase', size), item.returnNo)),
                   },
                 ]}

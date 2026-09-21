@@ -1,14 +1,14 @@
 import { Href, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 
 import { EmptyState } from '@/components/EmptyState';
+import { ListRow } from '@/components/ListRow';
 import { ScreenGate } from '@/components/ScreenGate';
 import { SearchBar } from '@/components/SearchBar';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { cardRadius, cardShadow } from '@/constants/layout';
 import { listCustomers, listVendors, subscribeErp } from '@/lib/erp';
 import { askExport } from '@/lib/exportShare';
 import { hasPermission } from '@/lib/permissions';
@@ -71,12 +71,11 @@ export function PartyList({ kind }: { kind: 'customers' | 'vendors' }) {
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={<EmptyState title={kind === 'customers' ? 'No customers' : 'No vendors'} />}
           renderItem={({ item }) => (
-            <Pressable
+            <ListRow
+              title={item.name}
+              subtitle={[item.phone, item.city].filter(Boolean).join(' · ') || undefined}
               onPress={() => router.push((kind === 'customers' ? `/customer/${item.id}` : `/vendor/${item.id}`) as Href)}
-              style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
-              <Text style={[styles.name, { color: colors.text }]}>{item.name}</Text>
-              <Text style={{ color: colors.muted }}>{[item.code, item.phone, item.city].filter(Boolean).join(' · ') || '—'}</Text>
-            </Pressable>
+            />
           )}
         />
       </View>
@@ -87,6 +86,4 @@ export function PartyList({ kind }: { kind: 'customers' | 'vendors' }) {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   list: { paddingHorizontal: 16, paddingBottom: 40 },
-  row: { borderRadius: cardRadius, padding: 14, gap: 4 },
-  name: { fontSize: 16, fontWeight: '800' },
 });

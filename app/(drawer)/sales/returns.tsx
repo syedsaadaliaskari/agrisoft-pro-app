@@ -40,9 +40,7 @@ export default function SaleReturnsScreen() {
                     key={sale.id}
                     onPress={() => router.push(`/return/sale/${sale.id}` as Href)}
                     style={[styles.row, { backgroundColor: colors.tintSoft }]}>
-                    <Text style={{ color: colors.text, fontWeight: '700' }}>
-                      {sale.invoiceNo} · {sale.customerName}
-                    </Text>
+                    <Text style={{ color: colors.text, fontWeight: '700' }}>{sale.customerName}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -51,14 +49,14 @@ export default function SaleReturnsScreen() {
           ListEmptyComponent={rows.length ? null : <EmptyState title="No sale returns" />}
           renderItem={({ item }) => (
             <View style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
-              <Text style={{ color: colors.text, fontWeight: '800' }}>{item.returnNo}</Text>
+              <Text style={{ color: colors.text, fontWeight: '800' }}>{item.partyName}</Text>
               <Text style={{ color: colors.muted }}>
-                {item.returnDate} · {item.partyName} · {money(item.grandTotal)}
+                {item.returnDate} · {money(item.grandTotal)}
               </Text>
               <ActionBar
                 actions={[
                   {
-                    label: 'Print',
+                    label: 'Share',
                     onPress: () => askPrint((size) => void printHtml(returnPrintHtml(item, 'sale', size), item.returnNo)),
                   },
                 ]}

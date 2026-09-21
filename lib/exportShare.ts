@@ -89,12 +89,5 @@ export function askExport<T>(opts: {
 }
 
 export function askPrint(run: (size: ReceiptSize) => void) {
-  showActionSheet({
-    title: 'Print',
-    message: 'Choose a size',
-    options: [
-      { label: 'Thermal', onPress: () => run('thermal') },
-      { label: 'A4', onPress: () => run('a4') },
-    ],
-  });
+  run('thermal');
 }

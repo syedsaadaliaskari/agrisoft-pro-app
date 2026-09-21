@@ -52,7 +52,7 @@ export function PrimaryButton({ label, tone = 'primary', color, textColor, disab
 
 const styles = StyleSheet.create({
   btn: {
-    minHeight: 44,
+    minHeight: 48,
     borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',

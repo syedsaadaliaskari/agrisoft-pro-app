@@ -9,7 +9,6 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
 import { listAccounts, listVouchers, money, postJournal, subscribeErp } from '@/lib/erp';
-import { askPrint } from '@/lib/exportShare';
 import { printHtml, voucherPrintHtml } from '@/lib/print';
 import { hasPermission } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
@@ -139,7 +138,7 @@ export default function JournalScreen() {
             </Text>
             <ActionBar
               actions={[
-                { label: 'Print', onPress: () => askPrint((size) => void printHtml(voucherPrintHtml(row, size), row.voucherNo)) },
+                { label: 'Share', onPress: () => void printHtml(voucherPrintHtml(row, 'thermal'), row.voucherNo) },
               ]}
             />
           </View>

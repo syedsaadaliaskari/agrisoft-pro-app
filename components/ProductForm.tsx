@@ -11,6 +11,7 @@ import {
   listCategories,
   listTaxes,
   listUnits,
+  money,
   removeProduct,
   saveProduct,
 } from '@/lib/erp';
@@ -38,6 +39,7 @@ export function ProductForm({ productId }: { productId?: string }) {
   const [costPrice, setCostPrice] = useState(String(existing?.costPrice ?? ''));
   const [wholesale, setWholesale] = useState(String(existing?.wholesalePrice ?? ''));
   const [reorder, setReorder] = useState(String(existing?.reorderLevel ?? 5));
+  const [initialStock, setInitialStock] = useState('0');
   const [packs, setPacks] = useState<Pack[]>(
     existing?.variants.length
       ? existing.variants.map((v) => ({
@@ -73,6 +75,20 @@ export function ProductForm({ productId }: { productId?: string }) {
           <Field label="Cost price" value={costPrice} onChangeText={setCostPrice} keyboardType="decimal-pad" />
           <Field label="Wholesale price" value={wholesale} onChangeText={setWholesale} keyboardType="decimal-pad" />
           <Field label="Reorder level" value={reorder} onChangeText={setReorder} keyboardType="decimal-pad" />
+          {!existing ? (
+            <Field
+              label="Initial stock"
+              value={initialStock}
+              onChangeText={setInitialStock}
+              keyboardType="decimal-pad"
+              hint="Qty already on the shelf for the first pack"
+            />
+          ) : null}
+          {Number(costPrice) > 0 && Number(salePrice) >= 0 && Number(salePrice) < Number(costPrice) ? (
+            <Text style={{ color: colors.danger, fontWeight: '700' }}>
+              Sale price is below cost by {money(Number(costPrice) - Number(salePrice))} per unit.
+            </Text>
+          ) : null}
         </Card>
         <Card title="Packs (size / color)">
           {packs.map((pack, index) => (
@@ -92,12 +108,14 @@ export function ProductForm({ productId }: { productId?: string }) {
                 value={pack.barcode}
                 onChangeText={(v) => setPacks((cur) => cur.map((p, i) => (i === index ? { ...p, barcode: v } : p)))}
               />
-              <Field
-                label="Stock"
-                value={pack.stockQty}
-                onChangeText={(v) => setPacks((cur) => cur.map((p, i) => (i === index ? { ...p, stockQty: v } : p)))}
-                keyboardType="decimal-pad"
-              />
+              {existing || index > 0 ? (
+                <Field
+                  label="Stock"
+                  value={pack.stockQty}
+                  onChangeText={(v) => setPacks((cur) => cur.map((p, i) => (i === index ? { ...p, stockQty: v } : p)))}
+                  keyboardType="decimal-pad"
+                />
+              ) : null}
               {packs.length > 1 ? (
                 <Pressable onPress={() => setPacks((cur) => cur.filter((_, i) => i !== index))}>
                   <Text style={{ color: colors.danger, fontWeight: '700' }}>Remove pack</Text>
@@ -134,12 +152,13 @@ export function ProductForm({ productId }: { productId?: string }) {
                 costPrice: Number(costPrice) || 0,
                 wholesalePrice: Number(wholesale) || 0,
                 reorderLevel: Number(reorder) || 0,
-                variants: packs.map((pack) => ({
+                initialStock: existing ? undefined : Number(initialStock),
+                variants: packs.map((pack, index) => ({
                   id: pack.id,
                   size: pack.size,
                   color: pack.color,
                   barcode: pack.barcode,
-                  stockQty: Number(pack.stockQty) || 0,
+                  stockQty: !existing && index === 0 ? Number(initialStock) : Number(pack.stockQty) || 0,
                   salePrice: Number(salePrice) || 0,
                   costPrice: Number(costPrice) || 0,
                 })),

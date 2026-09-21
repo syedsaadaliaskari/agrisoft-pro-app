@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
   label: { ...font, fontSize: typeScale.label, fontWeight: '500' },
   input: {
     ...font,
-    minHeight: 44,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: radius.lg,
     paddingHorizontal: 12,

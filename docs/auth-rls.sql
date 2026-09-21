@@ -5,7 +5,7 @@
 --
 -- After this file:
 -- 1. Authentication → Providers → Email → turn OFF "Confirm email" (shop staff).
--- 2. Phone: Create account with email + password + shop code (tenant id).
+-- 2. Phone: Create account with email + password + the shop code from PC Settings.
 -- 3. You may leave EXPO_PUBLIC_TENANT_ID in .env as a fallback until login works,
 --    then you can remove that line. Keep URL + anon key.
 
@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS public.tenant_members (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, tenant_id)
 );
+
+ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS join_code text;
 
 ALTER TABLE public.tenant_members ENABLE ROW LEVEL SECURITY;
 
@@ -36,20 +38,32 @@ SET search_path = public
 AS $$
 DECLARE
   tid text;
+  entered text;
+  raw text;
 BEGIN
   IF auth.uid() IS NULL THEN
     RAISE EXCEPTION 'Not signed in';
   END IF;
-  tid := trim(shop_code);
-  IF tid = '' THEN
+  entered := trim(shop_code);
+  raw := upper(regexp_replace(entered, '[^A-Za-z0-9]', '', 'g'));
+  IF raw = '' THEN
     RAISE EXCEPTION 'Shop code is required';
   END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.tenants
-    WHERE id = tid AND deleted_at IS NULL AND COALESCE(is_active, true) = true
-  ) THEN
+  SELECT t.id INTO tid
+  FROM public.tenants t
+  WHERE t.deleted_at IS NULL
+    AND COALESCE(t.is_active, true) = true
+    AND (
+      t.id = entered
+      OR lower(t.id) = lower(entered)
+      OR upper(regexp_replace(COALESCE(t.join_code, ''), '[^A-Za-z0-9]', '', 'g')) = raw
+    )
+  LIMIT 1;
+  IF tid IS NULL THEN
     RAISE EXCEPTION 'Unknown shop code';
   END IF;
+  DELETE FROM public.tenant_members
+  WHERE user_id = auth.uid() AND tenant_id <> tid;
   INSERT INTO public.tenant_members (user_id, tenant_id)
   VALUES (auth.uid(), tid)
   ON CONFLICT DO NOTHING;

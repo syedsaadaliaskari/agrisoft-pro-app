@@ -46,7 +46,9 @@ export default function SaleDetail() {
             <Text style={{ color: colors.muted }}>Tax {money(sale.taxAmount)}</Text>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>Total {money(sale.grandTotal)}</Text>
             <Text style={{ color: colors.muted }}>Paid {money(sale.paidAmount)}</Text>
-            <Text style={{ color: colors.muted }}>Balance {money(sale.grandTotal - sale.paidAmount)}</Text>
+            {(sale.cashPaid ?? 0) > 0 ? <Text style={{ color: colors.muted }}>Cash {money(sale.cashPaid ?? 0)}</Text> : null}
+            {(sale.bankPaid ?? 0) > 0 ? <Text style={{ color: colors.muted }}>Bank {money(sale.bankPaid ?? 0)}</Text> : null}
+            <Text style={{ color: colors.muted }}>Receivable {money(sale.grandTotal - sale.paidAmount)}</Text>
             {sale.notes ? <Text style={{ color: colors.text }}>{sale.notes}</Text> : null}
             <ActionBar
               actions={[
@@ -56,11 +58,11 @@ export default function SaleDetail() {
                   onPress: () => router.push(`/sale/edit/${sale.id}` as Href),
                 },
                 {
-                  label: 'Print',
+                  label: 'Share',
                   onPress: () =>
                     askPrint((size) => {
                       void printHtml(salePrintHtml(sale, size), sale.invoiceNo).catch((e) =>
-                        Alert.alert(e instanceof Error ? e.message : 'Print failed'),
+                        Alert.alert(e instanceof Error ? e.message : 'Share failed'),
                       );
                     }),
                 },

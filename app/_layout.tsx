@@ -9,6 +9,7 @@ import { AppActionSheet } from '@/components/AppActionSheet';
 import Colors from '@/constants/Colors';
 import { hydrateErp } from '@/lib/erp';
 import { hydrateRbac } from '@/lib/rbac';
+import { hydrateSyncStatus } from '@/lib/syncStatus';
 import { hydrateVendor } from '@/lib/vendor';
 
 export { ErrorBoundary } from 'expo-router';
@@ -36,7 +37,13 @@ export default function RootLayout() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    void Promise.all([hydrateRbac(), hydrateVendor(), hydrateErp()]).then(async () => {
+    void Promise.all([
+      hydrateRbac(),
+      hydrateVendor(),
+      hydrateErp(),
+      hydrateSyncStatus(),
+      import('@/lib/i18n').then((m) => m.hydrateLocale()),
+    ]).then(async () => {
       try {
         const { hydrateCloudAuth } = await import('@/lib/cloudAuth');
         await hydrateCloudAuth();

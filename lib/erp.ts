@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { newId } from '@/lib/id';
+import { moneyRound, resolveMoneySplit, resolveSettlement, type PaymentMode } from '@/lib/settlement';
 import { rememberDeleted } from '@/lib/tombstones';
 
-export type PaymentMode = 'cash' | 'credit' | 'bank';
+export type { PaymentMode } from '@/lib/settlement';
 export type AmountType = 'percent' | 'fixed';
 export type AccountType = 'asset' | 'liability' | 'equity' | 'income' | 'expense';
 export type VoucherType =
@@ -15,7 +16,8 @@ export type VoucherType =
   | 'receipt'
   | 'journal'
   | 'expense'
-  | 'income';
+  | 'income'
+  | 'owner_draw';
 
 export type ShopSettings = {
   shop_name: string;
@@ -131,6 +133,8 @@ export type SaleDoc = {
   additionAmount: number;
   grandTotal: number;
   paidAmount: number;
+  cashPaid?: number;
+  bankPaid?: number;
   taxAmount: number;
   notes: string;
   status: 'posted' | 'cancelled';
@@ -152,6 +156,8 @@ export type PurchaseDoc = {
   additionAmount: number;
   grandTotal: number;
   paidAmount: number;
+  cashPaid?: number;
+  bankPaid?: number;
   taxAmount: number;
   notes: string;
   status: 'posted' | 'cancelled';
@@ -306,6 +312,7 @@ function seed(): Store {
       acc('2100', 'Payables', 'liability'),
       acc('3000', 'Equity', 'equity'),
       acc('3100', 'Owner Equity', 'equity'),
+      acc('3200', 'Owner Draw', 'equity'),
       acc('4000', 'Income', 'income'),
       acc('4100', 'Sales', 'income'),
       acc('4200', 'Other Income', 'income'),
@@ -329,6 +336,7 @@ function seed(): Store {
       journal: 1,
       expense: 1,
       income: 1,
+      owner_draw: 1,
       customer: 1,
       vendor: 1,
       product: 1,
@@ -404,15 +412,34 @@ export function computeDocTotals(
     taxAmount?: number;
     paidAmount?: number;
     paymentMode?: PaymentMode;
+    cashPaid?: number | null;
+    bankPaid?: number | null;
   },
 ) {
   const discountAmount = num(extra.discountAmount);
   const additionAmount = num(extra.additionAmount);
   const taxAmount = num(extra.taxAmount);
-  const grandTotal = Math.max(0, Math.round((subtotal - discountAmount + additionAmount + taxAmount) * 100) / 100);
-  const paidAmount =
-    extra.paidAmount == null ? (extra.paymentMode === 'credit' ? 0 : grandTotal) : num(extra.paidAmount);
-  return { subtotal, discountAmount, additionAmount, taxAmount, grandTotal, paidAmount };
+  const grandTotal = Math.max(0, moneyRound(subtotal - discountAmount + additionAmount + taxAmount));
+  const settled = resolveSettlement({
+    grandTotal,
+    paymentMode: extra.paymentMode,
+    paidAmount: extra.paidAmount,
+    cashPaid: extra.cashPaid,
+    bankPaid: extra.bankPaid,
+  });
+  if ('error' in settled) throw new Error(settled.error);
+  return {
+    subtotal,
+    discountAmount,
+    additionAmount,
+    taxAmount,
+    grandTotal,
+    paidAmount: settled.paidAmount,
+    cashPaid: settled.cashPaid,
+    bankPaid: settled.bankPaid,
+    due: settled.due,
+    paymentMode: settled.paymentMode,
+  };
 }
 
 function makeLines(items: { id?: string; variantId: string; quantity: number; unitPrice: number }[]): DocLine[] {
@@ -432,9 +459,147 @@ function makeLines(items: { id?: string; variantId: string; quantity: number; un
   });
 }
 
-function payAccount(mode: PaymentMode, creditCode: '1300' | '2100') {
-  if (mode === 'credit') return accountByCode(creditCode);
-  return mode === 'bank' ? accountByCode('1200') : accountByCode('1100');
+function cashBankIds() {
+  return { cash: accountByCode('1100'), bank: accountByCode('1200') };
+}
+
+function saleMoneyEntries(
+  settled: { cashPaid: number; bankPaid: number; due: number; paidAmount: number },
+  grandTotal: number,
+  narration: string,
+) {
+  const { cash, bank } = cashBankIds();
+  const recv = accountByCode('1300');
+  const sales = accountByCode('4100');
+  const entries: Array<Omit<VoucherEntry, 'id'> & { id?: string }> = [];
+  if (settled.cashPaid > 0) {
+    entries.push({ accountId: cash.id, debit: settled.cashPaid, credit: 0, narration });
+  }
+  if (settled.bankPaid > 0) {
+    entries.push({ accountId: bank.id, debit: settled.bankPaid, credit: 0, narration });
+  }
+  if (settled.due > 0) {
+    entries.push({ accountId: recv.id, debit: settled.due, credit: 0, narration });
+  }
+  entries.push({ accountId: sales.id, debit: 0, credit: grandTotal, narration });
+  const header = settled.cashPaid > 0 ? cash.id : settled.bankPaid > 0 ? bank.id : recv.id;
+  return { entries, headerAccountId: header };
+}
+
+function purchaseMoneyEntries(
+  settled: { cashPaid: number; bankPaid: number; due: number },
+  grandTotal: number,
+  narration: string,
+) {
+  const { cash, bank } = cashBankIds();
+  const pay = accountByCode('2100');
+  const inventory = accountByCode('1400');
+  const entries: Array<Omit<VoucherEntry, 'id'> & { id?: string }> = [
+    { accountId: inventory.id, debit: grandTotal, credit: 0, narration },
+  ];
+  if (settled.cashPaid > 0) {
+    entries.push({ accountId: cash.id, debit: 0, credit: settled.cashPaid, narration });
+  }
+  if (settled.bankPaid > 0) {
+    entries.push({ accountId: bank.id, debit: 0, credit: settled.bankPaid, narration });
+  }
+  if (settled.due > 0) {
+    entries.push({ accountId: pay.id, debit: 0, credit: settled.due, narration });
+  }
+  const header = settled.cashPaid > 0 ? cash.id : settled.bankPaid > 0 ? bank.id : pay.id;
+  return { entries, headerAccountId: header };
+}
+
+function moneyOutEntries(cashPaid: number, bankPaid: number, narration: string) {
+  const { cash, bank } = cashBankIds();
+  const entries: Array<Omit<VoucherEntry, 'id'> & { id?: string }> = [];
+  if (cashPaid > 0) entries.push({ accountId: cash.id, debit: 0, credit: cashPaid, narration });
+  if (bankPaid > 0) entries.push({ accountId: bank.id, debit: 0, credit: bankPaid, narration });
+  return { entries, headerAccountId: cashPaid > 0 ? cash.id : bank.id };
+}
+
+function moneyInEntries(cashPaid: number, bankPaid: number, narration: string) {
+  const { cash, bank } = cashBankIds();
+  const entries: Array<Omit<VoucherEntry, 'id'> & { id?: string }> = [];
+  if (cashPaid > 0) entries.push({ accountId: cash.id, debit: cashPaid, credit: 0, narration });
+  if (bankPaid > 0) entries.push({ accountId: bank.id, debit: bankPaid, credit: 0, narration });
+  return { entries, headerAccountId: cashPaid > 0 ? cash.id : bank.id };
+}
+
+function legsFromVoucher(voucherId: string | null, side: 'debit' | 'credit') {
+  const { cash, bank } = cashBankIds();
+  const voucher = store.vouchers.find((row) => row.id === voucherId);
+  let cashPaid = 0;
+  let bankPaid = 0;
+  for (const entry of voucher?.entries ?? []) {
+    const amt = side === 'debit' ? entry.debit : entry.credit;
+    if (entry.accountId === cash.id) cashPaid = moneyRound(cashPaid + amt);
+    if (entry.accountId === bank.id) bankPaid = moneyRound(bankPaid + amt);
+  }
+  return { cashPaid, bankPaid };
+}
+
+function sourceCashBank(
+  doc: {
+    voucherId: string | null;
+    cashPaid?: number;
+    bankPaid?: number;
+    paidAmount: number;
+    paymentMode: PaymentMode;
+  },
+  side: 'debit' | 'credit',
+) {
+  if (doc.cashPaid != null || doc.bankPaid != null) {
+    return { cashPaid: doc.cashPaid ?? 0, bankPaid: doc.bankPaid ?? 0 };
+  }
+  const fromVoucher = legsFromVoucher(doc.voucherId, side);
+  if (fromVoucher.cashPaid > 0 || fromVoucher.bankPaid > 0) return fromVoucher;
+  if (doc.paymentMode === 'bank') return { cashPaid: 0, bankPaid: doc.paidAmount };
+  if (doc.paymentMode === 'credit') return { cashPaid: 0, bankPaid: 0 };
+  return { cashPaid: doc.paidAmount, bankPaid: 0 };
+}
+
+function scaleReturnMoney(
+  source: {
+    voucherId: string | null;
+    cashPaid?: number;
+    bankPaid?: number;
+    paidAmount: number;
+    paymentMode: PaymentMode;
+    grandTotal: number;
+  },
+  returnTotal: number,
+  side: 'debit' | 'credit',
+) {
+  const orig = sourceCashBank(source, side);
+  if (source.grandTotal <= 0) return { cashPaid: 0, bankPaid: 0, due: returnTotal };
+  const ratio = returnTotal / source.grandTotal;
+  let cashPaid = moneyRound(orig.cashPaid * ratio);
+  let bankPaid = moneyRound(orig.bankPaid * ratio);
+  let due = moneyRound(returnTotal - cashPaid - bankPaid);
+  if (due < 0) {
+    const extra = moneyRound(-due);
+    due = 0;
+    if (bankPaid >= extra) bankPaid = moneyRound(bankPaid - extra);
+    else {
+      cashPaid = Math.max(0, moneyRound(cashPaid - (extra - bankPaid)));
+      bankPaid = 0;
+    }
+  }
+  return { cashPaid, bankPaid, due };
+}
+
+function accountBook(code: string) {
+  const acc = accountByCode(code);
+  let signed = acc.openingBalance;
+  for (const voucher of store.vouchers) {
+    if (voucher.status !== 'posted') continue;
+    for (const entry of voucher.entries) {
+      if (entry.accountId !== acc.id) continue;
+      signed = moneyRound(signed + entry.debit - entry.credit);
+    }
+  }
+  return signed;
 }
 
 function cancelLinkedVoucher(type: VoucherType, referenceNo: string) {
@@ -509,21 +674,51 @@ function migrateStore() {
       if (!row.isActive) rememberDeleted(table, row.id);
     }
   }
-  const fillDoc = (doc: SaleDoc | PurchaseDoc) => {
+  const fillDoc = (doc: SaleDoc | PurchaseDoc, side: 'debit' | 'credit') => {
     doc.voucherId = doc.voucherId ?? null;
     doc.subtotal = doc.subtotal ?? doc.grandTotal;
     doc.discountAmount = doc.discountAmount ?? 0;
     doc.additionAmount = doc.additionAmount ?? 0;
     doc.taxAmount = doc.taxAmount ?? 0;
     doc.paidAmount = doc.paidAmount ?? 0;
+    if (doc.cashPaid == null && doc.bankPaid == null) {
+      try {
+        const legs = sourceCashBank(doc, side);
+        doc.cashPaid = legs.cashPaid;
+        doc.bankPaid = legs.bankPaid;
+      } catch {
+        if (doc.paymentMode === 'bank') {
+          doc.bankPaid = doc.paidAmount;
+          doc.cashPaid = 0;
+        } else if (doc.paymentMode === 'credit') {
+          doc.cashPaid = 0;
+          doc.bankPaid = 0;
+        } else {
+          doc.cashPaid = doc.paidAmount;
+          doc.bankPaid = 0;
+        }
+      }
+    }
     for (const line of doc.items) {
       line.id = line.id || newId();
       line.size = line.size ?? '';
       line.color = line.color ?? '';
     }
   };
-  store.sales.forEach(fillDoc);
-  store.purchases.forEach(fillDoc);
+  store.sales.forEach((doc) => fillDoc(doc, 'debit'));
+  store.purchases.forEach((doc) => fillDoc(doc, 'credit'));
+  if (!store.accounts.some((row) => row.code === '3200')) {
+    store.accounts.push({
+      id: newId(),
+      code: '3200',
+      name: 'Owner Draw',
+      accountType: 'equity',
+      isSystem: true,
+      isActive: true,
+      openingBalance: 0,
+    });
+  }
+  store.counters.owner_draw = store.counters.owner_draw ?? 1;
   for (const sale of store.sales) {
     if (sale.deletedAt) rememberDeleted('sales', sale.id);
   }
@@ -551,6 +746,18 @@ function migrateStore() {
   bumpCounter('vendor', store.vendors.map((row) => row.code));
   bumpCounter('product', store.products.map((row) => row.sku));
   for (const voucher of store.vouchers) bumpCounter(voucher.voucherType, [voucher.voucherNo]);
+}
+
+/** Drop phone-only leftover books so the next cloud pull matches this shop. */
+export async function resetLocalShopBooks() {
+  skipPersistHook = true;
+  try {
+    store = seed();
+    await persist();
+    emit();
+  } finally {
+    skipPersistHook = false;
+  }
 }
 
 export async function hydrateErp() {
@@ -781,6 +988,7 @@ export async function saveProduct(input: {
   costPrice: number;
   wholesalePrice?: number;
   stockQty?: number;
+  initialStock?: number;
   reorderLevel?: number;
   isActive?: boolean;
   variants?: {
@@ -795,24 +1003,51 @@ export async function saveProduct(input: {
 }) {
   const name = input.name.trim();
   if (!name) throw new Error('Name is required');
+  if (input.costPrice < 0 || Number.isNaN(input.costPrice)) throw new Error('Cost price must be a non-negative number');
+  if (input.salePrice < 0 || Number.isNaN(input.salePrice)) throw new Error('Sale price must be a non-negative number');
   const existing = input.id ? store.products.find((r) => r.id === input.id) : undefined;
+  const opening = Number(input.initialStock ?? input.stockQty ?? 0);
+  if (!existing && (Number.isNaN(opening) || opening < 0)) {
+    throw new Error('Initial stock must be a non-negative number');
+  }
   const sku = input.sku?.trim() || existing?.sku || nextDoc('product');
+  const seedPack = {
+    id: undefined as string | undefined,
+    size: 'Default',
+    color: 'Standard',
+    barcode: '',
+    stockQty: opening,
+    salePrice: input.salePrice,
+    costPrice: input.costPrice,
+  };
   const variants = (input.variants?.length
     ? input.variants
     : existing?.variants?.length
       ? existing.variants
-      : [{ size: '', color: '', stockQty: input.stockQty ?? 0, salePrice: input.salePrice, costPrice: input.costPrice }]
-  ).map((variant, index) => ({
-    id: variant.id || existing?.variants[index]?.id || newId(),
-    productId: existing?.id ?? '',
-    sku: index === 0 ? sku : `${sku}-${index + 1}`,
-    barcode: variant.barcode ?? existing?.variants[index]?.barcode ?? '',
-    size: variant.size ?? '',
-    color: variant.color ?? '',
-    stockQty: variant.stockQty ?? existing?.variants[index]?.stockQty ?? input.stockQty ?? 0,
-    salePrice: variant.salePrice ?? input.salePrice,
-    costPrice: variant.costPrice ?? input.costPrice,
-  }));
+      : [seedPack]
+  ).map((variant, index) => {
+    const prior = existing?.variants[index];
+    let size = variant.size ?? prior?.size ?? '';
+    let color = variant.color ?? prior?.color ?? '';
+    let stockQty = variant.stockQty ?? prior?.stockQty ?? 0;
+    if (!existing && index === 0) {
+      if (!size.trim()) size = 'Default';
+      if (!color.trim()) color = 'Standard';
+      if (input.initialStock != null || input.stockQty != null) stockQty = opening;
+    }
+    if (Number.isNaN(stockQty) || stockQty < 0) throw new Error('Stock must be a non-negative number');
+    return {
+      id: variant.id || prior?.id || newId(),
+      productId: existing?.id ?? '',
+      sku: index === 0 ? sku : `${sku}-${index + 1}`,
+      barcode: variant.barcode ?? prior?.barcode ?? '',
+      size,
+      color,
+      stockQty,
+      salePrice: variant.salePrice ?? input.salePrice,
+      costPrice: variant.costPrice ?? input.costPrice,
+    };
+  });
   const row: Product = {
     id: existing?.id ?? newId(),
     sku,
@@ -900,13 +1135,15 @@ type MoneyBits = {
   additionAmount?: number;
   taxAmount?: number;
   paidAmount?: number;
+  cashPaid?: number | null;
+  bankPaid?: number | null;
   notes?: string;
 };
 
 export async function createSale(input: {
   invoiceDate: string;
   customerId: string | null;
-  paymentMode: PaymentMode;
+  paymentMode?: PaymentMode;
   items: LineInput[];
 } & MoneyBits) {
   if (!input.items.length) throw new Error('Add at least one item.');
@@ -917,8 +1154,7 @@ export async function createSale(input: {
     items.reduce((s, l) => s + l.lineTotal, 0),
     input,
   );
-  const other = payAccount(input.paymentMode, '1300');
-  const sales = accountByCode('4100');
+  const legs = saleMoneyEntries(totals, totals.grandTotal, '');
   const invoiceNo = nextDoc('sale');
   const invoiceDate = input.invoiceDate || today();
   const voucher = postVoucher({
@@ -927,14 +1163,11 @@ export async function createSale(input: {
     voucherDate: invoiceDate,
     partyId: customer?.id ?? null,
     partyName: customer?.name ?? 'Walk-in',
-    accountId: other.id,
+    accountId: legs.headerAccountId,
     referenceNo: invoiceNo,
     notes: input.notes ?? '',
     grandTotal: totals.grandTotal,
-    entries: [
-      { id: newId(), accountId: other.id, debit: totals.grandTotal, credit: 0, narration: invoiceNo },
-      { id: newId(), accountId: sales.id, debit: 0, credit: totals.grandTotal, narration: invoiceNo },
-    ],
+    entries: legs.entries.map((entry) => ({ ...entry, narration: invoiceNo })),
   });
   const doc: SaleDoc = {
     id: newId(),
@@ -943,7 +1176,6 @@ export async function createSale(input: {
     invoiceDate,
     customerId: customer?.id ?? null,
     customerName: customer?.name ?? 'Walk-in',
-    paymentMode: input.paymentMode,
     ...totals,
     notes: input.notes ?? '',
     status: 'posted',
@@ -963,7 +1195,7 @@ export async function updateSale(
   input: {
     invoiceDate: string;
     customerId: string | null;
-    paymentMode: PaymentMode;
+    paymentMode?: PaymentMode;
     items: LineInput[];
   } & MoneyBits,
 ) {
@@ -979,13 +1211,11 @@ export async function updateSale(
       items.reduce((s, l) => s + l.lineTotal, 0),
       input,
     );
-    const other = payAccount(input.paymentMode, '1300');
-    const sales = accountByCode('4100');
+    const legs = saleMoneyEntries(totals, totals.grandTotal, sale.invoiceNo);
     Object.assign(sale, {
       invoiceDate: input.invoiceDate || sale.invoiceDate,
       customerId: customer?.id ?? null,
       customerName: customer?.name ?? 'Walk-in',
-      paymentMode: input.paymentMode,
       ...totals,
       notes: input.notes ?? '',
       items,
@@ -998,14 +1228,11 @@ export async function updateSale(
       voucherDate: sale.invoiceDate,
       partyId: sale.customerId,
       partyName: sale.customerName,
-      accountId: other.id,
+      accountId: legs.headerAccountId,
       referenceNo: sale.invoiceNo,
       notes: sale.notes,
       grandTotal: totals.grandTotal,
-      entries: [
-        { id: newId(), accountId: other.id, debit: totals.grandTotal, credit: 0, narration: sale.invoiceNo },
-        { id: newId(), accountId: sales.id, debit: 0, credit: totals.grandTotal, narration: sale.invoiceNo },
-      ],
+      entries: legs.entries,
     });
     sale.voucherId = voucher.id;
     audit('sales', 'update', sale.invoiceNo);
@@ -1021,7 +1248,7 @@ export async function updateSale(
 export async function createPurchase(input: {
   invoiceDate: string;
   vendorId: string | null;
-  paymentMode: PaymentMode;
+  paymentMode?: PaymentMode;
   items: LineInput[];
 } & MoneyBits) {
   if (!input.items.length) throw new Error('Add at least one item.');
@@ -1033,8 +1260,7 @@ export async function createPurchase(input: {
     items.reduce((s, l) => s + l.lineTotal, 0),
     input,
   );
-  const other = payAccount(input.paymentMode, '2100');
-  const inventory = accountByCode('1400');
+  const legs = purchaseMoneyEntries(totals, totals.grandTotal, '');
   const invoiceNo = nextDoc('purchase');
   const invoiceDate = input.invoiceDate || today();
   const voucher = postVoucher({
@@ -1043,14 +1269,11 @@ export async function createPurchase(input: {
     voucherDate: invoiceDate,
     partyId: vendor.id,
     partyName: vendor.name,
-    accountId: other.id,
+    accountId: legs.headerAccountId,
     referenceNo: invoiceNo,
     notes: input.notes ?? '',
     grandTotal: totals.grandTotal,
-    entries: [
-      { id: newId(), accountId: inventory.id, debit: totals.grandTotal, credit: 0, narration: invoiceNo },
-      { id: newId(), accountId: other.id, debit: 0, credit: totals.grandTotal, narration: invoiceNo },
-    ],
+    entries: legs.entries.map((entry) => ({ ...entry, narration: invoiceNo })),
   });
   const doc: PurchaseDoc = {
     id: newId(),
@@ -1059,7 +1282,6 @@ export async function createPurchase(input: {
     invoiceDate,
     vendorId: vendor.id,
     vendorName: vendor.name,
-    paymentMode: input.paymentMode,
     ...totals,
     notes: input.notes ?? '',
     status: 'posted',
@@ -1079,7 +1301,7 @@ export async function updatePurchase(
   input: {
     invoiceDate: string;
     vendorId: string | null;
-    paymentMode: PaymentMode;
+    paymentMode?: PaymentMode;
     items: LineInput[];
   } & MoneyBits,
 ) {
@@ -1096,13 +1318,11 @@ export async function updatePurchase(
       items.reduce((s, l) => s + l.lineTotal, 0),
       input,
     );
-    const other = payAccount(input.paymentMode, '2100');
-    const inventory = accountByCode('1400');
+    const legs = purchaseMoneyEntries(totals, totals.grandTotal, purchase.invoiceNo);
     Object.assign(purchase, {
       invoiceDate: input.invoiceDate || purchase.invoiceDate,
       vendorId: vendor.id,
       vendorName: vendor.name,
-      paymentMode: input.paymentMode,
       ...totals,
       notes: input.notes ?? '',
       items,
@@ -1115,14 +1335,11 @@ export async function updatePurchase(
       voucherDate: purchase.invoiceDate,
       partyId: vendor.id,
       partyName: vendor.name,
-      accountId: other.id,
+      accountId: legs.headerAccountId,
       referenceNo: purchase.invoiceNo,
       notes: purchase.notes,
       grandTotal: totals.grandTotal,
-      entries: [
-        { accountId: inventory.id, debit: totals.grandTotal, credit: 0, narration: purchase.invoiceNo },
-        { accountId: other.id, debit: 0, credit: totals.grandTotal, narration: purchase.invoiceNo },
-      ],
+      entries: legs.entries,
     });
     purchase.voucherId = voucher.id;
     audit('purchases', 'update', purchase.invoiceNo);
@@ -1155,23 +1372,29 @@ export async function createSaleReturn(input: { saleId: string; items: { variant
   });
   const grandTotal = items.reduce((s, l) => s + l.lineTotal, 0);
   const sales = accountByCode('4100');
-  const recv = payAccount(sale.paymentMode, '1300');
+  const { cash, bank } = cashBankIds();
+  const recv = accountByCode('1300');
+  const settled = scaleReturnMoney(sale, grandTotal, 'debit');
   const returnNo = nextDoc('sale_return');
   const returnDate = today();
+  const entries: Array<Omit<VoucherEntry, 'id'>> = [
+    { accountId: sales.id, debit: grandTotal, credit: 0, narration: returnNo },
+  ];
+  if (settled.cashPaid > 0) entries.push({ accountId: cash.id, debit: 0, credit: settled.cashPaid, narration: returnNo });
+  if (settled.bankPaid > 0) entries.push({ accountId: bank.id, debit: 0, credit: settled.bankPaid, narration: returnNo });
+  if (settled.due > 0) entries.push({ accountId: recv.id, debit: 0, credit: settled.due, narration: returnNo });
+  const headerAccountId = settled.cashPaid > 0 ? cash.id : settled.bankPaid > 0 ? bank.id : recv.id;
   const voucher = postVoucher({
     voucherNo: returnNo,
     voucherType: 'sale_return',
     voucherDate: returnDate,
     partyId: sale.customerId,
     partyName: sale.customerName,
-    accountId: recv.id,
+    accountId: headerAccountId,
     referenceNo: returnNo,
     notes: sale.invoiceNo,
     grandTotal,
-    entries: [
-      { accountId: sales.id, debit: grandTotal, credit: 0, narration: returnNo },
-      { accountId: recv.id, debit: 0, credit: grandTotal, narration: returnNo },
-    ],
+    entries,
   });
   const doc: ReturnDoc = {
     id: newId(),
@@ -1211,23 +1434,28 @@ export async function createPurchaseReturn(input: { purchaseId: string; items: {
   });
   const grandTotal = items.reduce((s, l) => s + l.lineTotal, 0);
   const inventory = accountByCode('1400');
-  const pay = payAccount(purchase.paymentMode, '2100');
+  const { cash, bank } = cashBankIds();
+  const pay = accountByCode('2100');
+  const settled = scaleReturnMoney(purchase, grandTotal, 'credit');
   const returnNo = nextDoc('purchase_return');
   const returnDate = today();
+  const entries: Array<Omit<VoucherEntry, 'id'>> = [];
+  if (settled.cashPaid > 0) entries.push({ accountId: cash.id, debit: settled.cashPaid, credit: 0, narration: returnNo });
+  if (settled.bankPaid > 0) entries.push({ accountId: bank.id, debit: settled.bankPaid, credit: 0, narration: returnNo });
+  if (settled.due > 0) entries.push({ accountId: pay.id, debit: settled.due, credit: 0, narration: returnNo });
+  entries.push({ accountId: inventory.id, debit: 0, credit: grandTotal, narration: returnNo });
+  const headerAccountId = settled.cashPaid > 0 ? cash.id : settled.bankPaid > 0 ? bank.id : pay.id;
   const voucher = postVoucher({
     voucherNo: returnNo,
     voucherType: 'purchase_return',
     voucherDate: returnDate,
     partyId: purchase.vendorId,
     partyName: purchase.vendorName,
-    accountId: pay.id,
+    accountId: headerAccountId,
     referenceNo: returnNo,
     notes: purchase.invoiceNo,
     grandTotal,
-    entries: [
-      { accountId: pay.id, debit: grandTotal, credit: 0, narration: returnNo },
-      { accountId: inventory.id, debit: 0, credit: grandTotal, narration: returnNo },
-    ],
+    entries,
   });
   const doc: ReturnDoc = {
     id: newId(),
@@ -1247,130 +1475,190 @@ export async function createPurchaseReturn(input: { purchaseId: string; items: {
   return doc;
 }
 
+function moneySplitFrom(input: {
+  amount?: number;
+  cashPaid?: number | null;
+  bankPaid?: number | null;
+  accountId?: string;
+}) {
+  const preferBank = input.accountId
+    ? store.accounts.find((row) => row.id === input.accountId)?.code === '1200'
+    : false;
+  const split = resolveMoneySplit({
+    amount: input.amount,
+    cashPaid: input.cashPaid,
+    bankPaid: input.bankPaid,
+    preferBank,
+  });
+  if ('error' in split) throw new Error(split.error);
+  return split;
+}
+
 export async function receivePayment(input: {
   voucherDate: string;
   customerId: string;
-  accountId: string;
-  amount: number;
+  accountId?: string;
+  amount?: number;
+  cashPaid?: number | null;
+  bankPaid?: number | null;
   referenceNo?: string;
   notes?: string;
 }) {
-  if (input.amount <= 0) throw new Error('Amount is required.');
   const customer = getCustomer(input.customerId);
   if (!customer) throw new Error('Choose a customer.');
-  const cash = store.accounts.find((a) => a.id === input.accountId);
-  if (!cash) throw new Error('Choose cash or bank.');
+  const split = moneySplitFrom(input);
+  const moneyIn = moneyInEntries(split.cashPaid, split.bankPaid, 'Receive payment');
   const recv = accountByCode('1300');
-  postVoucher({
+  const voucher = postVoucher({
     voucherType: 'receipt',
     voucherDate: input.voucherDate || today(),
     partyId: customer.id,
     partyName: customer.name,
-    accountId: cash.id,
+    accountId: moneyIn.headerAccountId,
     referenceNo: input.referenceNo ?? '',
     notes: input.notes ?? '',
-    grandTotal: input.amount,
+    grandTotal: split.amount,
     entries: [
-      { accountId: cash.id, debit: input.amount, credit: 0, narration: 'Receive payment' },
-      { accountId: recv.id, debit: 0, credit: input.amount, narration: customer.name },
+      ...moneyIn.entries,
+      { accountId: recv.id, debit: 0, credit: split.amount, narration: customer.name },
     ],
   });
-  audit('transactions', 'receipt', `${customer.name} ${input.amount}`);
+  audit('transactions', 'receipt', `${customer.name} ${split.amount}`);
   await persist();
   emit();
+  return voucher;
 }
 
 export async function makePayment(input: {
   voucherDate: string;
   vendorId: string;
-  accountId: string;
-  amount: number;
+  accountId?: string;
+  amount?: number;
+  cashPaid?: number | null;
+  bankPaid?: number | null;
   referenceNo?: string;
   notes?: string;
 }) {
-  if (input.amount <= 0) throw new Error('Amount is required.');
   const vendor = getVendor(input.vendorId);
   if (!vendor) throw new Error('Choose a vendor.');
-  const cash = store.accounts.find((a) => a.id === input.accountId);
-  if (!cash) throw new Error('Choose cash or bank.');
+  const split = moneySplitFrom(input);
+  const moneyOut = moneyOutEntries(split.cashPaid, split.bankPaid, 'Make payment');
   const pay = accountByCode('2100');
-  postVoucher({
+  const voucher = postVoucher({
     voucherType: 'payment',
     voucherDate: input.voucherDate || today(),
     partyId: vendor.id,
     partyName: vendor.name,
-    accountId: cash.id,
+    accountId: moneyOut.headerAccountId,
     referenceNo: input.referenceNo ?? '',
     notes: input.notes ?? '',
-    grandTotal: input.amount,
+    grandTotal: split.amount,
     entries: [
-      { accountId: pay.id, debit: input.amount, credit: 0, narration: vendor.name },
-      { accountId: cash.id, debit: 0, credit: input.amount, narration: 'Make payment' },
+      { accountId: pay.id, debit: split.amount, credit: 0, narration: vendor.name },
+      ...moneyOut.entries,
     ],
   });
-  audit('transactions', 'payment', `${vendor.name} ${input.amount}`);
+  audit('transactions', 'payment', `${vendor.name} ${split.amount}`);
   await persist();
   emit();
+  return voucher;
 }
 
 export async function postExpense(input: {
   voucherDate: string;
   expenseAccountId: string;
-  accountId: string;
-  amount: number;
+  accountId?: string;
+  amount?: number;
+  cashPaid?: number | null;
+  bankPaid?: number | null;
   notes?: string;
 }) {
-  if (input.amount <= 0) throw new Error('Amount is required.');
   const exp = store.accounts.find((a) => a.id === input.expenseAccountId);
-  const cash = store.accounts.find((a) => a.id === input.accountId);
-  if (!exp || !cash) throw new Error('Choose accounts.');
-  postVoucher({
+  if (!exp) throw new Error('Choose an expense account.');
+  const split = moneySplitFrom(input);
+  const moneyOut = moneyOutEntries(split.cashPaid, split.bankPaid, 'Expense');
+  const voucher = postVoucher({
     voucherType: 'expense',
     voucherDate: input.voucherDate || today(),
     partyId: null,
     partyName: exp.name,
-    accountId: cash.id,
+    accountId: moneyOut.headerAccountId,
     referenceNo: '',
     notes: input.notes ?? '',
-    grandTotal: input.amount,
+    grandTotal: split.amount,
     entries: [
-      { accountId: exp.id, debit: input.amount, credit: 0, narration: exp.name },
-      { accountId: cash.id, debit: 0, credit: input.amount, narration: 'Expense' },
+      { accountId: exp.id, debit: split.amount, credit: 0, narration: exp.name },
+      ...moneyOut.entries,
     ],
   });
-  audit('transactions', 'expense', `${exp.name} ${input.amount}`);
+  audit('transactions', 'expense', `${exp.name} ${split.amount}`);
   await persist();
   emit();
+  return voucher;
 }
 
 export async function postIncome(input: {
   voucherDate: string;
   incomeAccountId: string;
-  accountId: string;
-  amount: number;
+  accountId?: string;
+  amount?: number;
+  cashPaid?: number | null;
+  bankPaid?: number | null;
   notes?: string;
 }) {
-  if (input.amount <= 0) throw new Error('Amount is required.');
   const inc = store.accounts.find((a) => a.id === input.incomeAccountId);
-  const cash = store.accounts.find((a) => a.id === input.accountId);
-  if (!inc || !cash) throw new Error('Choose accounts.');
-  postVoucher({
+  if (!inc) throw new Error('Choose an income account.');
+  const split = moneySplitFrom(input);
+  const moneyIn = moneyInEntries(split.cashPaid, split.bankPaid, 'Income');
+  const voucher = postVoucher({
     voucherType: 'income',
     voucherDate: input.voucherDate || today(),
     partyId: null,
     partyName: inc.name,
-    accountId: cash.id,
+    accountId: moneyIn.headerAccountId,
     referenceNo: '',
     notes: input.notes ?? '',
-    grandTotal: input.amount,
+    grandTotal: split.amount,
     entries: [
-      { accountId: cash.id, debit: input.amount, credit: 0, narration: 'Income' },
-      { accountId: inc.id, debit: 0, credit: input.amount, narration: inc.name },
+      ...moneyIn.entries,
+      { accountId: inc.id, debit: 0, credit: split.amount, narration: inc.name },
     ],
   });
-  audit('transactions', 'income', `${inc.name} ${input.amount}`);
+  audit('transactions', 'income', `${inc.name} ${split.amount}`);
   await persist();
   emit();
+  return voucher;
+}
+
+export async function postOwnerDraw(input: {
+  voucherDate: string;
+  accountId?: string;
+  amount?: number;
+  cashPaid?: number | null;
+  bankPaid?: number | null;
+  notes?: string;
+}) {
+  const split = moneySplitFrom(input);
+  const draw = accountByCode('3200');
+  const moneyOut = moneyOutEntries(split.cashPaid, split.bankPaid, 'Owner draw');
+  const voucher = postVoucher({
+    voucherType: 'owner_draw',
+    voucherDate: input.voucherDate || today(),
+    partyId: null,
+    partyName: 'Owner draw',
+    accountId: moneyOut.headerAccountId,
+    referenceNo: '',
+    notes: input.notes ?? '',
+    grandTotal: split.amount,
+    entries: [
+      { accountId: draw.id, debit: split.amount, credit: 0, narration: 'Owner draw' },
+      ...moneyOut.entries,
+    ],
+  });
+  audit('transactions', 'owner_draw', String(split.amount));
+  await persist();
+  emit();
+  return voucher;
 }
 
 export async function postJournal(input: {
@@ -1555,6 +1843,18 @@ export function dashboardSummary() {
   const monthSales = sales.filter((r) => r.invoiceDate.startsWith(month)).reduce((s, r) => s + r.grandTotal, 0);
   const monthPurchases = purchases.filter((r) => r.invoiceDate.startsWith(month)).reduce((s, r) => s + r.grandTotal, 0);
   const inv = inventoryRows();
+  let cashBalance = 0;
+  let bankBalance = 0;
+  try {
+    cashBalance = accountBook('1100');
+  } catch {
+    cashBalance = 0;
+  }
+  try {
+    bankBalance = accountBook('1200');
+  } catch {
+    bankBalance = 0;
+  }
   const points = [...Array(7)].map((_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
@@ -1576,6 +1876,8 @@ export function dashboardSummary() {
     vendorCount: listVendors().length,
     productCount: listProducts().length,
     lowStockCount: inv.filter((r) => r.isLow).length,
+    cashBalance,
+    bankBalance,
     points,
   };
 }

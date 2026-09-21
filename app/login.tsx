@@ -1,5 +1,5 @@
 import { Redirect, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -9,6 +9,7 @@ import { useColorScheme } from '@/components/useColorScheme';
 import { font, radius, tokens, typeScale } from '@/constants/theme';
 import { createShopAccount, signInShopAccount } from '@/lib/cloudAuth';
 import { getSession, signInWithPassword } from '@/lib/rbac';
+import { getLocale, setLocale, subscribeLocale, t } from '@/lib/i18n';
 
 export default function LoginScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -20,6 +21,8 @@ export default function LoginScreen() {
   const [shopCode, setShopCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [, tick] = useState(0);
+  useEffect(() => subscribeLocale(() => tick((n) => n + 1)), []);
 
   if (getSession()) {
     return <Redirect href="/" />;
@@ -63,13 +66,18 @@ export default function LoginScreen() {
     <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
         <AppLogo size={80} />
-        <Text style={[styles.title, { color: colors.text }]}>Agri Soft Pro</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{t('brand.name')}</Text>
         <Text style={[styles.sub, { color: colors.muted }]}>
-          {mode === 'create' ? 'Create account' : 'Sign in'}
+          {mode === 'create' ? t('login.create') : t('login.signIn')}
         </Text>
         <Pressable onPress={() => setMode(mode === 'create' ? 'signin' : 'create')}>
           <Text style={[styles.switch, { color: colors.tint }]}>
-            {mode === 'create' ? 'Already have an account? Sign in' : 'New on this phone? Create account'}
+            {mode === 'create' ? t('login.haveAccount') : t('login.newPhone')}
+          </Text>
+        </Pressable>
+        <Pressable onPress={() => void setLocale(getLocale() === 'ur' ? 'en' : 'ur')}>
+          <Text style={[styles.switch, { color: colors.muted }]}>
+            {t('lang.switch')}: {getLocale() === 'ur' ? t('lang.english') : t('lang.urdu')}
           </Text>
         </Pressable>
         <TextInput
@@ -78,7 +86,7 @@ export default function LoginScreen() {
           autoCapitalize="none"
           autoComplete="email"
           keyboardType="email-address"
-          placeholder="Email"
+          placeholder={t('login.email')}
           placeholderTextColor={colors.muted}
           style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
         />
@@ -86,7 +94,7 @@ export default function LoginScreen() {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
-          placeholder="Password"
+          placeholder={t('login.password')}
           placeholderTextColor={colors.muted}
           style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
         />
@@ -94,20 +102,17 @@ export default function LoginScreen() {
           value={shopCode}
           onChangeText={setShopCode}
           autoCapitalize="none"
-          placeholder={mode === 'create' ? 'Shop code (from the owner / PC)' : 'Shop code (first time only)'}
+          placeholder={t('login.shopCode')}
           placeholderTextColor={colors.muted}
           style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
         />
-        <Text style={[styles.hint, { color: colors.muted }]}>
-          Shop code is the shop’s cloud id. The owner gives it to you once. After that, only email and password.
-        </Text>
         {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
         <Pressable
           onPress={() => void submit()}
           disabled={busy}
           style={[styles.button, { backgroundColor: colors.tint, opacity: busy ? 0.5 : 1 }]}>
           <Text style={styles.buttonText}>
-            {busy ? 'Please wait…' : mode === 'create' ? 'Create account' : 'Sign in'}
+            {busy ? t('login.wait') : mode === 'create' ? t('login.create') : t('login.signIn')}
           </Text>
         </Pressable>
       </ScrollView>
@@ -121,12 +126,11 @@ const styles = StyleSheet.create({
   title: { ...font, fontSize: 26, fontWeight: '600', marginTop: 8 },
   sub: { ...font, fontSize: typeScale.body },
   switch: { ...font, fontSize: typeScale.label, fontWeight: '600', marginBottom: 4 },
-  hint: { ...font, fontSize: typeScale.label, textAlign: 'center', maxWidth: 360 },
   input: {
     ...font,
     width: '100%',
     maxWidth: 360,
-    minHeight: 44,
+    minHeight: 48,
     borderWidth: 1,
     borderRadius: radius.lg,
     paddingHorizontal: 12,
@@ -136,7 +140,7 @@ const styles = StyleSheet.create({
   error: { ...font, fontSize: typeScale.label, fontWeight: '500', textAlign: 'center', maxWidth: 360 },
   button: {
     marginTop: 8,
-    minHeight: 44,
+    minHeight: 48,
     minWidth: 220,
     borderRadius: radius.lg,
     alignItems: 'center',

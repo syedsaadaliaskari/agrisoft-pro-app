@@ -46,7 +46,9 @@ export default function PurchaseDetail() {
             <Text style={{ color: colors.muted }}>Tax {money(row.taxAmount)}</Text>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 18 }}>Total {money(row.grandTotal)}</Text>
             <Text style={{ color: colors.muted }}>Paid {money(row.paidAmount)}</Text>
-            <Text style={{ color: colors.muted }}>Balance {money(row.grandTotal - row.paidAmount)}</Text>
+            {(row.cashPaid ?? 0) > 0 ? <Text style={{ color: colors.muted }}>Cash {money(row.cashPaid ?? 0)}</Text> : null}
+            {(row.bankPaid ?? 0) > 0 ? <Text style={{ color: colors.muted }}>Bank {money(row.bankPaid ?? 0)}</Text> : null}
+            <Text style={{ color: colors.muted }}>Payable {money(row.grandTotal - row.paidAmount)}</Text>
             {row.notes ? <Text style={{ color: colors.text }}>{row.notes}</Text> : null}
             <ActionBar
               actions={[
@@ -56,7 +58,7 @@ export default function PurchaseDetail() {
                   onPress: () => router.push(`/purchase/edit/${row.id}` as Href),
                 },
                 {
-                  label: 'Print',
+                  label: 'Share',
                   onPress: () => askPrint((size) => void printHtml(purchasePrintHtml(row, size), row.invoiceNo)),
                 },
                 {

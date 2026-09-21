@@ -1,14 +1,14 @@
 import { Href, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 
 import { EmptyState } from '@/components/EmptyState';
+import { ListRow } from '@/components/ListRow';
 import { ScreenGate } from '@/components/ScreenGate';
 import { SearchBar } from '@/components/SearchBar';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { cardRadius, cardShadow } from '@/constants/layout';
 import { listProducts, money, subscribeErp } from '@/lib/erp';
 import { askExport } from '@/lib/exportShare';
 import { hasPermission } from '@/lib/permissions';
@@ -32,7 +32,7 @@ export default function ProductsScreen() {
     <ScreenGate permission="products.view">
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
         <View style={{ padding: 16, gap: 10 }}>
-          <SearchBar value={query} onChangeText={setQuery} />
+          <SearchBar value={query} onChangeText={setQuery} placeholder="Search by name" />
           {hasPermission(getSession(), 'products.manage') ? (
             <PrimaryButton label="Add product" color={colors.tint} onPress={() => router.push('/product/new' as Href)} />
           ) : null}
@@ -63,14 +63,11 @@ export default function ProductsScreen() {
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={<EmptyState title="No products" />}
           renderItem={({ item }) => (
-            <Pressable
+            <ListRow
+              title={item.name}
+              subtitle={`${money(item.salePrice)} · stock ${item.variants.reduce((s, v) => s + v.stockQty, 0)}`}
               onPress={() => router.push(`/product/${item.id}` as Href)}
-              style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 16 }}>{item.name}</Text>
-              <Text style={{ color: colors.muted }}>
-                {item.sku} · {money(item.salePrice)} · stock {item.variants.reduce((s, v) => s + v.stockQty, 0)}
-              </Text>
-            </Pressable>
+            />
           )}
         />
       </View>
@@ -80,5 +77,4 @@ export default function ProductsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  row: { borderRadius: cardRadius, padding: 14, gap: 4 },
 });

@@ -71,3 +71,9 @@ export async function dropTombstones(done: Tombstone[]) {
   rows = rows.filter((row) => !keys.has(`${row.table}:${row.id}`));
   await AsyncStorage.setItem(KEY, JSON.stringify(rows));
 }
+
+export async function clearTombstones() {
+  rows = [];
+  loaded = true;
+  await AsyncStorage.setItem(KEY, JSON.stringify(rows));
+}

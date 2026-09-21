@@ -69,11 +69,11 @@ export const shopNavigation: NavGroup[] = [
     title: 'Transactions',
     icon: 'swap-vertical-outline',
     items: [
-      { label: 'Journal', href: '/transactions/journal', icon: 'book-outline', permission: 'transactions.view', audience: 'shop' },
       { label: 'Receive payment', href: '/transactions/receive', icon: 'arrow-down-outline', permission: 'transactions.view', audience: 'shop' },
       { label: 'Make payment', href: '/transactions/pay', icon: 'arrow-up-outline', permission: 'transactions.view', audience: 'shop' },
       { label: 'Expense', href: '/transactions/expense', icon: 'wallet-outline', permission: 'transactions.view', audience: 'shop' },
       { label: 'Income', href: '/transactions/income', icon: 'trending-up-outline', permission: 'transactions.view', audience: 'shop' },
+      { label: 'Owner draw', href: '/transactions/owner-draw', icon: 'person-outline', permission: 'transactions.view', audience: 'shop' },
     ],
   },
   {

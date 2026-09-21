@@ -5,6 +5,7 @@ import { ActionBar } from '@/components/ActionBar';
 import { Card, Field, PickRow } from '@/components/FormKit';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenGate } from '@/components/ScreenGate';
+import { SettlementPad } from '@/components/SettlementPad';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { cardRadius, cardShadow } from '@/constants/layout';
@@ -18,6 +19,7 @@ import {
   money,
   postExpense,
   postIncome,
+  postOwnerDraw,
   receivePayment,
   subscribeErp,
   type Account,
@@ -27,10 +29,9 @@ import {
 } from '@/lib/erp';
 import { hasPermission } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
-import { askPrint } from '@/lib/exportShare';
 import { printHtml, voucherPrintHtml } from '@/lib/print';
 
-type Kind = 'receipt' | 'payment' | 'expense' | 'income';
+type Kind = 'receipt' | 'payment' | 'expense' | 'income' | 'owner_draw';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -44,16 +45,16 @@ export function VoucherScreen({ kind }: { kind: Kind }) {
   useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
   const rows = listVouchers(kind as VoucherType);
   const parties: Party[] = kind === 'receipt' ? listCustomers() : kind === 'payment' ? listVendors() : [];
-  const cash = listAccounts({ cashBankOnly: true });
   const special =
     kind === 'expense' ? listAccounts({ accountType: 'expense' }) : kind === 'income' ? listAccounts({ accountType: 'income' }) : [];
   const [date, setDate] = useState(today());
   const [partyId, setPartyId] = useState(parties[0]?.id ?? '');
-  const [accountId, setAccountId] = useState(cash[0]?.id ?? '');
   const [specialId, setSpecialId] = useState(special[0]?.id ?? '');
   const [amount, setAmount] = useState('');
+  const [cashPaid, setCashPaid] = useState('');
+  const [bankPaid, setBankPaid] = useState('0');
   const [notes, setNotes] = useState('');
-  const [pick, setPick] = useState<'party' | 'cash' | 'special' | null>(null);
+  const [pick, setPick] = useState<'party' | 'special' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const stats = useMemo(() => {
@@ -68,22 +69,41 @@ export function VoucherScreen({ kind }: { kind: Kind }) {
   }, [rows]);
 
   const title =
-    kind === 'receipt' ? 'Receive payment' : kind === 'payment' ? 'Make payment' : kind === 'expense' ? 'Expense' : 'Income';
+    kind === 'receipt'
+      ? 'Receive payment'
+      : kind === 'payment'
+        ? 'Make payment'
+        : kind === 'expense'
+          ? 'Expense'
+          : kind === 'income'
+            ? 'Income'
+            : 'Owner draw';
 
-  const save = async () => {
+  const save = async (andShare: boolean) => {
     setError(null);
     try {
-      const n = Number(amount);
-      if (kind === 'receipt') {
-        await receivePayment({ voucherDate: date, customerId: partyId, accountId, amount: n, notes });
-      } else if (kind === 'payment') {
-        await makePayment({ voucherDate: date, vendorId: partyId, accountId, amount: n, notes });
-      } else if (kind === 'expense') {
-        await postExpense({ voucherDate: date, expenseAccountId: specialId, accountId, amount: n, notes });
-      } else {
-        await postIncome({ voucherDate: date, incomeAccountId: specialId, accountId, amount: n, notes });
-      }
+      const n = Number(amount) || Number(cashPaid || 0) + Number(bankPaid || 0);
+      const bits = {
+        voucherDate: date,
+        amount: n,
+        cashPaid: Number(cashPaid || 0),
+        bankPaid: Number(bankPaid || 0),
+        notes,
+      };
+      const voucher =
+        kind === 'receipt'
+          ? await receivePayment({ ...bits, customerId: partyId })
+          : kind === 'payment'
+            ? await makePayment({ ...bits, vendorId: partyId })
+            : kind === 'expense'
+              ? await postExpense({ ...bits, expenseAccountId: specialId })
+              : kind === 'income'
+                ? await postIncome({ ...bits, incomeAccountId: specialId })
+                : await postOwnerDraw(bits);
+      if (andShare) await printHtml(voucherPrintHtml(voucher, 'thermal'), voucher.voucherNo);
       setAmount('');
+      setCashPaid('');
+      setBankPaid('0');
       setNotes('');
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save.");
@@ -109,28 +129,36 @@ export function VoucherScreen({ kind }: { kind: Kind }) {
                 selected={partyName(partyId, parties)}
                 onPress={() => setPick('party')}
               />
-            ) : (
+            ) : kind === 'expense' || kind === 'income' ? (
               <PickRow
                 label={kind === 'expense' ? 'Expense account' : 'Income account'}
                 selected={partyName(specialId, special)}
                 onPress={() => setPick('special')}
               />
-            )}
-            <PickRow label="Cash / bank" selected={partyName(accountId, cash)} onPress={() => setPick('cash')} />
+            ) : null}
             <Field label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+            <SettlementPad
+              grandTotal={Number(amount) || 0}
+              cashPaid={cashPaid}
+              bankPaid={bankPaid}
+              onCashPaid={setCashPaid}
+              onBankPaid={setBankPaid}
+              allowCredit={false}
+              defaultHow="cash"
+            />
             <Field label="Notes" value={notes} onChangeText={setNotes} />
             {error ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{error}</Text> : null}
-            <PrimaryButton label="Save" color={colors.tint} onPress={() => void save()} />
+            <PrimaryButton label="Save" color={colors.tint} onPress={() => void save(false)} />
+            <PrimaryButton label="Save & share" tone="secondary" color={colors.tint} onPress={() => void save(true)} />
           </Card>
         ) : null}
         {pick ? (
           <Card title="Choose">
-            {(pick === 'party' ? parties : pick === 'cash' ? cash : special).map((row: Account | Party) => (
+            {(pick === 'party' ? parties : special).map((row: Account | Party) => (
               <Pressable
                 key={row.id}
                 onPress={() => {
                   if (pick === 'party') setPartyId(row.id);
-                  if (pick === 'cash') setAccountId(row.id);
                   if (pick === 'special') setSpecialId(row.id);
                   setPick(null);
                 }}
@@ -154,8 +182,8 @@ export function VoucherScreen({ kind }: { kind: Kind }) {
             <ActionBar
               actions={[
                 {
-                  label: 'Print',
-                  onPress: () => askPrint((size) => void printHtml(voucherPrintHtml(row, size), row.voucherNo)),
+                  label: 'Share',
+                  onPress: () => void printHtml(voucherPrintHtml(row, 'thermal'), row.voucherNo),
                 },
                 {
                   label: 'Cancel',
