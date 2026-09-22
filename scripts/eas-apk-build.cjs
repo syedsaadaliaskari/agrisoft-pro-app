@@ -28,19 +28,17 @@ try {
     return;
   }
 
-  const env = {
+  // Shop id comes from sign-in + shop code. Do not bake tenant-dev-001 into the APK.
+  eas.build.preview.env = {
     EXPO_PUBLIC_SUPABASE_URL:
       envFile.EXPO_PUBLIC_SUPABASE_URL || "https://vbyqlfxcfxijmrvilupp.supabase.co",
     EXPO_PUBLIC_SUPABASE_ANON_KEY: anon,
   };
-  if (envFile.EXPO_PUBLIC_TENANT_ID) {
-    env.EXPO_PUBLIC_TENANT_ID = envFile.EXPO_PUBLIC_TENANT_ID;
-  }
-  eas.build.preview.env = env;
   fs.writeFileSync(easPath, JSON.stringify(eas, null, 2) + "\n");
+  const easCmd = process.platform === "win32" ? "node_modules\\.bin\\eas.cmd" : "node_modules/.bin/eas";
   const r = spawnSync(
-    "npx",
-    ["eas-cli", "build", "-p", "android", "--profile", "preview", "--non-interactive", "--no-wait"],
+    easCmd,
+    ["build", "-p", "android", "--profile", "preview", "--non-interactive", "--no-wait"],
     { stdio: "inherit", shell: true },
   );
   process.exitCode = r.status ?? 1;

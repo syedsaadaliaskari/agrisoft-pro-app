@@ -43,8 +43,7 @@
         }
       ],
       "expo-sharing",
-      "expo-file-system",
-      "expo-print"
+      "expo-file-system"
     ],
     "experiments": {
       "typedRoutes": true
