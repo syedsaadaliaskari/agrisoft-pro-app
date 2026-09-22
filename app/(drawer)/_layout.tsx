@@ -71,8 +71,9 @@ export default function DrawerLayout() {
       <Drawer.Screen name="setup/discounts" options={{ title: tNav('Discounts') }} />
       <Drawer.Screen name="setup/additions" options={{ title: tNav('Additions') }} />
       <Drawer.Screen name="platform/licenses" options={{ title: tNav('Activated list') }} />
+      <Drawer.Screen name="platform/messages" options={{ title: tNav('Messages') }} />
       <Drawer.Screen name="settings/index" options={{ title: tNav('Settings') }} />
-      <Drawer.Screen name="settings/license" options={{ title: tNav('License') }} />
+      <Drawer.Screen name="settings/license" options={{ title: tNav('License'), drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="settings/users" options={{ title: tNav('Users & roles') }} />
       <Drawer.Screen name="settings/password" options={{ title: tNav('Update password') }} />
       <Drawer.Screen name="settings/backup" options={{ title: tNav('Backup') }} />

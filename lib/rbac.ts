@@ -138,22 +138,12 @@ async function ensureVendorRbac(): Promise<void> {
     accountantRole.permissionCodes = [...ACCOUNTANT_CODES];
     changed = true;
   }
+  const { isVendorUnlocked } = await import('@/lib/vendorUnlock');
   const superRole = store.roles.find((role) => role.name === 'Super Admin');
+  const adminRoleForDemote = store.roles.find((role) => role.name === 'Admin');
   const adminUser = store.users.find((user) => user.username === 'admin');
-  if (superRole && adminUser && adminUser.roleId !== superRole.id) {
-    adminUser.roleId = superRole.id;
-    adminUser.isActive = true;
-    changed = true;
-  }
-  if (superRole && !adminUser) {
-    store.users.push({
-      id: newId(),
-      username: 'admin',
-      passwordHash: await bcrypt.hash('admin123', 10),
-      fullName: 'Super Admin',
-      roleId: superRole.id,
-      isActive: true,
-    });
+  if (superRole && adminRoleForDemote && adminUser && adminUser.roleId === superRole.id && !isVendorUnlocked()) {
+    adminUser.roleId = adminRoleForDemote.id;
     changed = true;
   }
   if (adminRole && !store.users.some((user) => user.username === 'shop')) {
@@ -167,11 +157,25 @@ async function ensureVendorRbac(): Promise<void> {
     });
     changed = true;
   }
-  if (session) {
+  if (session && !session.id.startsWith('cloud:')) {
     const current = store.users.find((user) => user.id === session?.id);
-    session = current ? toSession(current) : null;
+    if (current) session = toSession(current);
   }
   if (changed) await persist();
+}
+
+export async function applyVendorConsoleSession(): Promise<void> {
+  if (!session) throw new Error("Couldn't unlock.");
+  const superRole = store.roles.find((role) => role.name === 'Super Admin');
+  if (!superRole) throw new Error("Couldn't unlock.");
+  session = {
+    ...session,
+    roleId: superRole.id,
+    roleName: superRole.name,
+    permissions: superRole.permissionCodes,
+  };
+  await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  emit();
 }
 
 export function subscribeSession(listener: () => void): () => void {
@@ -200,6 +204,10 @@ export async function hydrateRbac(): Promise<void> {
       await AsyncStorage.removeItem(SESSION_KEY);
     }
     await ensureVendorRbac();
+    const { isVendorUnlocked } = await import('@/lib/vendorUnlock');
+    if (isVendorUnlocked() && session) {
+      await applyVendorConsoleSession();
+    }
     emit();
   } catch {
     store = seedStore();
@@ -268,7 +276,9 @@ export async function signInWithPassword(username: string, password: string): Pr
   }
   session = toSession(found);
   await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  emit();
+  const { isVendorUnlocked } = await import('@/lib/vendorUnlock');
+  if (isVendorUnlocked()) await applyVendorConsoleSession();
+  else emit();
 }
 
 /** Shop staff who signed in with cloud email — Admin menus on this phone. */
@@ -285,7 +295,9 @@ export async function startCloudShopSession(email: string) {
     permissions: adminRole.permissionCodes,
   };
   await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  emit();
+  const { isVendorUnlocked } = await import('@/lib/vendorUnlock');
+  if (isVendorUnlocked()) await applyVendorConsoleSession();
+  else emit();
 }
 
 function nameFromEmail(local: string) {

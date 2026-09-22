@@ -12,10 +12,20 @@ import { dashboardSummary, getSettings, money, subscribeErp } from '@/lib/erp';
 import { formatWhen } from '@/lib/format';
 import { getSyncStatus, subscribeSyncStatus } from '@/lib/syncStatus';
 import { isSuperAdminUser } from '@/lib/permissions';
-import { getSession } from '@/lib/rbac';
+import { getSession, subscribeSession } from '@/lib/rbac';
 import { subscribeLocale, t } from '@/lib/i18n';
+import { subscribeVendorUnlock } from '@/lib/vendorUnlock';
 
 export default function HomeScreen() {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const a = subscribeSession(() => tick((n) => n + 1));
+    const b = subscribeVendorUnlock(() => tick((n) => n + 1));
+    return () => {
+      a();
+      b();
+    };
+  }, []);
   if (isSuperAdminUser(getSession())) {
     return (
       <ScreenGate permission="dashboard.view">

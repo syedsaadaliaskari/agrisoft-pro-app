@@ -14,6 +14,7 @@ export function Field({
   keyboardType,
   multiline,
   editable = true,
+  secureTextEntry,
   error,
   hint,
 }: {
@@ -24,6 +25,7 @@ export function Field({
   keyboardType?: 'default' | 'decimal-pad' | 'phone-pad' | 'email-address';
   multiline?: boolean;
   editable?: boolean;
+  secureTextEntry?: boolean;
   error?: string;
   hint?: string;
 }) {
@@ -40,6 +42,7 @@ export function Field({
         keyboardType={keyboardType}
         multiline={multiline}
         editable={editable}
+        secureTextEntry={secureTextEntry}
         textAlignVertical={multiline ? 'top' : 'center'}
         style={[
           styles.input,

@@ -13,6 +13,7 @@ import { getSyncStatus, subscribeSyncStatus } from '@/lib/syncStatus';
 import { isSuperAdminUser } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
 import { getLocale, setLocale, subscribeLocale, t, type Locale } from '@/lib/i18n';
+import { isVendorUnlocked, subscribeVendorUnlock, unlockVendor } from '@/lib/vendorUnlock';
 
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -23,10 +24,12 @@ export default function SettingsScreen() {
     const a = subscribeErp(() => tick((n) => n + 1));
     const b = subscribeSyncStatus(() => tick((n) => n + 1));
     const c = subscribeLocale(() => tick((n) => n + 1));
+    const d = subscribeVendorUnlock(() => tick((n) => n + 1));
     return () => {
       a();
       b();
       c();
+      d();
     };
   }, []);
   const current = getSettings();
@@ -38,6 +41,9 @@ export default function SettingsScreen() {
   const [receipt_footer, setFooter] = useState(current.receipt_footer);
   const [ok, setOk] = useState<string | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [vendorCode, setVendorCode] = useState('');
+  const [vendorBusy, setVendorBusy] = useState(false);
+  const [vendorError, setVendorError] = useState<string | null>(null);
   const sync = getSyncStatus();
 
   return (
@@ -46,7 +52,7 @@ export default function SettingsScreen() {
         {isSuperAdminUser(user) ? (
           <Card title="Vendor">
             <Text style={{ color: colors.muted }}>
-              Signed in as {user?.fullName} ({user?.roleName}). Company list, licenses, users, backup, and audit are in the menu.
+              Signed in as {user?.fullName}
             </Text>
           </Card>
         ) : (
@@ -119,6 +125,36 @@ export default function SettingsScreen() {
               }}
             />
           </Card>
+          {isVendorUnlocked() ? null : (
+          <Card title="Vendor unlock">
+            <Field
+              label="Vendor unlock code"
+              value={vendorCode}
+              onChangeText={setVendorCode}
+              secureTextEntry
+            />
+            {vendorError ? <Text style={{ color: colors.danger, fontWeight: '600' }}>{vendorError}</Text> : null}
+            <PrimaryButton
+              label={vendorBusy ? 'Unlocking…' : 'Unlock'}
+              tone="ghost"
+              color={colors.tint}
+              disabled={vendorBusy || !vendorCode.trim()}
+              onPress={async () => {
+                setVendorBusy(true);
+                setVendorError(null);
+                try {
+                  await unlockVendor(vendorCode);
+                  setVendorCode('');
+                  setOk('Unlocked.');
+                } catch (err) {
+                  setVendorError(err instanceof Error ? err.message : "Couldn't unlock.");
+                } finally {
+                  setVendorBusy(false);
+                }
+              }}
+            />
+          </Card>
+          )}
           </>
         )}
       </ScrollView>

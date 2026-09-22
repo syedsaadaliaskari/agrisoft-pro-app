@@ -37,13 +37,15 @@ export default function RootLayout() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    void Promise.all([
-      hydrateRbac(),
-      hydrateVendor(),
-      hydrateErp(),
-      hydrateSyncStatus(),
-      import('@/lib/i18n').then((m) => m.hydrateLocale()),
-    ]).then(async () => {
+    void (async () => {
+      await import('@/lib/vendorUnlock').then((m) => m.hydrateVendorUnlock());
+      await Promise.all([
+        hydrateRbac(),
+        hydrateVendor(),
+        hydrateErp(),
+        hydrateSyncStatus(),
+        import('@/lib/i18n').then((m) => m.hydrateLocale()),
+      ]);
       try {
         const { hydrateCloudAuth } = await import('@/lib/cloudAuth');
         await hydrateCloudAuth();
@@ -55,7 +57,7 @@ export default function RootLayout() {
       }
       setReady(true);
       SplashScreen.hideAsync();
-    });
+    })();
   }, []);
 
   if (!ready) return null;

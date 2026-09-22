@@ -1,104 +1,97 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { Card, Chips } from '@/components/FormKit';
+import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { cardRadius, cardShadow } from '@/constants/layout';
-import { deleteLicense, hydrateVendor, listLicenses, subscribeVendor } from '@/lib/vendor';
-import type { LicenseRow } from '@/lib/activation';
-import { shareTextOrFile, showShareError } from '@/lib/shareOut';
+import { font, typeScale } from '@/constants/theme';
+import { sharePdfFromHtml, showShareError } from '@/lib/shareOut';
+import { fetchCloudLicenses } from '@/lib/vendorLicensesCloud';
+import {
+  activatedListPdfHtml,
+  filterLicenses,
+  licenseExpiresLabel,
+  licenseStatusLabel,
+  toLicenseExportRow,
+  type CloudLicense,
+  type LicenseListFilter,
+} from '@/lib/vendorLicenseUi';
 
 export default function ActivatedListScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
-  const [rows, setRows] = useState<LicenseRow[]>([]);
+  const [rows, setRows] = useState<CloudLicense[]>([]);
+  const [filter, setFilter] = useState<LicenseListFilter>('all');
   const [loading, setLoading] = useState(true);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    await hydrateVendor();
-    setRows(await listLicenses());
-    setLoading(false);
+    setError(null);
+    try {
+      setRows(await fetchCloudLicenses());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't load this data.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     void load();
-    return subscribeVendor(() => {
-      void listLicenses().then(setRows);
-    });
   }, [load]);
+
+  const visible = useMemo(() => filterLicenses(rows, filter), [rows, filter]);
+
+  const sharePdf = async () => {
+    try {
+      await sharePdfFromHtml(activatedListPdfHtml(visible.map(toLicenseExportRow)), 'Activated companies');
+    } catch (err) {
+      showShareError(err);
+    }
+  };
 
   return (
     <ScreenGate permission="license.view">
       <ScrollView
-        style={[styles.screen, { backgroundColor: colors.background }]}
+        style={{ flex: 1, backgroundColor: colors.background }}
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.tint} />}>
-        <Text style={[styles.hint, { color: colors.muted }]}>
-          Share the activation code with the shop. Stop access removes the record from this list.
-        </Text>
-        {msg ? <Text style={[styles.ok, { color: colors.tint }]}>{msg}</Text> : null}
-        {!loading && !rows.length ? (
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            <Text style={[styles.empty, { color: colors.text }]}>No activated companies yet</Text>
-            <Text style={[styles.hint, { color: colors.muted }]}>
-              Open Settings → License, paste an Install ID, then activate.
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={colors.tint} />}>
+        <Chips
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'active', label: 'Active' },
+            { value: 'ended', label: 'Ended' },
+          ]}
+        />
+        <PrimaryButton label="Share PDF" tone="secondary" color={colors.tint} onPress={() => void sharePdf()} />
+        {error ? <Text style={[styles.err, { color: colors.danger }]}>{error}</Text> : null}
+        {!loading && !visible.length ? (
+          <Card title="Activated list">
+            <Text style={{ color: colors.text, fontWeight: '600' }}>
+              On desktop Super Admin → Activated list → Upload to phone
             </Text>
-          </View>
+          </Card>
         ) : (
-          rows.map((row) => (
-            <View key={row.id} style={[styles.card, { backgroundColor: colors.card }]}>
-              <Text style={[styles.name, { color: colors.text }]}>{row.name}</Text>
-              <Text selectable style={[styles.mono, { color: colors.muted }]}>
-                {row.installId}
-              </Text>
-              <Text style={[styles.meta, { color: colors.muted }]}>
-                {row.plan} · activated {row.activatedAt} · expires {row.expiresAt ?? 'Never'}
-              </Text>
-              <Text selectable style={[styles.code, { color: colors.text, backgroundColor: colors.tintSoft }]}>
-                {row.activationCode}
-              </Text>
-              <View style={styles.actions}>
-                <Pressable
-                  onPress={() => {
-                    void shareTextOrFile({
-                      filename: 'activation-code.txt',
-                      mime: 'text/plain',
-                      contents: row.activationCode,
-                      title: `Activation ${row.name}`,
-                    })
-                      .then(() => setMsg(`Activation code ready for ${row.name}.`))
-                      .catch(showShareError);
-                  }}>
-                  <Text style={{ color: colors.tint, fontWeight: '800' }}>Share code</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() =>
-                    Alert.alert(
-                      'Stop access',
-                      `Remove activation for ${row.name}? Their PC stays unlocked until they lose the code or you stop access on that machine.`,
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                          text: 'Stop',
-                          style: 'destructive',
-                          onPress: () => {
-                            void deleteLicense(row.id).then(() => {
-                              setMsg(`Removed activation for ${row.name}.`);
-                              void load();
-                            });
-                          },
-                        },
-                      ],
-                    )
-                  }>
-                  <Text style={{ color: colors.danger, fontWeight: '800' }}>Stop access</Text>
-                </Pressable>
+          visible.map((row) => {
+            const ended = licenseStatusLabel(row) === 'Ended';
+            return (
+              <View key={row.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Text style={[styles.company, { color: colors.text }]}>{row.name}</Text>
+                <Text style={[styles.meta, { color: colors.muted }]}>Phone {row.phone || '—'}</Text>
+                <Text style={[styles.meta, { color: colors.muted }]}>Plan {row.plan}</Text>
+                <Text style={[styles.meta, { color: colors.muted }]}>Start {row.activatedAt}</Text>
+                <Text style={[styles.meta, { color: colors.muted }]}>End {licenseExpiresLabel(row)}</Text>
+                <Text style={[styles.status, { color: ended ? colors.danger : colors.success }]}>
+                  {licenseStatusLabel(row)}
+                </Text>
               </View>
-            </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
     </ScreenGate>
@@ -106,15 +99,10 @@ export default function ActivatedListScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
   content: { padding: 16, gap: 12, paddingBottom: 40 },
-  hint: { fontSize: 13, lineHeight: 18 },
-  ok: { fontSize: 14, fontWeight: '700' },
-  card: { borderRadius: cardRadius, padding: 16, gap: 8, ...cardShadow },
-  empty: { fontSize: 16, fontWeight: '800' },
-  name: { fontSize: 17, fontWeight: '800' },
-  mono: { fontSize: 13, fontFamily: 'monospace' },
-  meta: { fontSize: 13 },
-  code: { fontSize: 12, lineHeight: 18, padding: 10, borderRadius: 12 },
-  actions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  card: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 4 },
+  company: { ...font, fontSize: typeScale.section, fontWeight: '600' },
+  meta: { ...font, fontSize: typeScale.body },
+  status: { ...font, fontSize: typeScale.label, fontWeight: '700', marginTop: 4 },
+  err: { ...font, fontSize: typeScale.body, fontWeight: '600' },
 });

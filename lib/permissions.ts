@@ -1,3 +1,5 @@
+import { isVendorUnlocked } from '@/lib/vendorUnlock';
+
 export const PERMISSION_CATALOG = [
   { code: 'dashboard.view', module: 'dashboard', description: 'View dashboard' },
   { code: 'products.view', module: 'products', description: 'View products' },
@@ -43,16 +45,15 @@ export function isShopPermission(code: string): boolean {
 }
 
 export function isSuperAdminUser(user: SessionUser | null | undefined): boolean {
-  return user?.roleName === 'Super Admin';
+  if (!user) return false;
+  return isVendorUnlocked();
 }
 
 export const VENDOR_CONSOLE_PERMISSIONS = new Set([
   'dashboard.view',
-  'license.manage',
   'license.view',
   'platform.view',
   'settings.manage',
-  'users.manage',
 ]);
 
 export function hasPermission(user: SessionUser | null | undefined, code: string): boolean {

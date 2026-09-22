@@ -35,12 +35,16 @@ try {
     EXPO_PUBLIC_SUPABASE_ANON_KEY: anon,
   };
   fs.writeFileSync(easPath, JSON.stringify(eas, null, 2) + "\n");
-  const easCmd = process.platform === "win32" ? "node_modules\\.bin\\eas.cmd" : "node_modules/.bin/eas";
-  const r = spawnSync(
-    easCmd,
-    ["build", "-p", "android", "--profile", "preview", "--non-interactive", "--no-wait"],
-    { stdio: "inherit", shell: true },
-  );
+  const easCmd = fs.existsSync("node_modules\\.bin\\eas.cmd")
+    ? "node_modules\\.bin\\eas.cmd"
+    : fs.existsSync("node_modules/.bin/eas")
+      ? "node_modules/.bin/eas"
+      : "npx";
+  const easArgs =
+    easCmd === "npx"
+      ? ["--yes", "eas-cli@24.7.0", "build", "-p", "android", "--profile", "preview", "--non-interactive", "--no-wait"]
+      : ["build", "-p", "android", "--profile", "preview", "--non-interactive", "--no-wait"];
+  const r = spawnSync(easCmd, easArgs, { stdio: "inherit", shell: true });
   process.exitCode = r.status ?? 1;
 } finally {
   fs.writeFileSync(easPath, original);
