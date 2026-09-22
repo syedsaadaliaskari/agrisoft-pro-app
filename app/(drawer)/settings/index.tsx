@@ -1,3 +1,4 @@
+import { Href, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { useEffect, useState } from 'react';
 
@@ -11,13 +12,14 @@ import { syncShopNow } from '@/lib/cloudSync';
 import { formatWhen } from '@/lib/format';
 import { getSyncStatus, subscribeSyncStatus } from '@/lib/syncStatus';
 import { isSuperAdminUser } from '@/lib/permissions';
-import { getSession } from '@/lib/rbac';
+import { getSession, signOut } from '@/lib/rbac';
 import { getLocale, setLocale, subscribeLocale, t, type Locale } from '@/lib/i18n';
 import { isVendorUnlocked, subscribeVendorUnlock, unlockVendor } from '@/lib/vendorUnlock';
 
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
+  const router = useRouter();
   const user = getSession();
   const [, tick] = useState(0);
   useEffect(() => {
@@ -157,6 +159,14 @@ export default function SettingsScreen() {
           )}
           </>
         )}
+        <PrimaryButton
+          label={t('topbar.logout')}
+          tone="danger"
+          color={colors.danger}
+          onPress={() => {
+            void signOut().then(() => router.replace('/login' as Href));
+          }}
+        />
       </ScrollView>
     </ScreenGate>
   );

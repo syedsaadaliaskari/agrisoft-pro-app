@@ -139,3 +139,20 @@ export function filterNavForUser(user: SessionUser | null): NavGroup[] {
     }))
     .filter((group) => group.items.length > 0);
 }
+
+export function navGroupKey(title: string): string {
+  return title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+
+export function homeHubGroups(user: SessionUser | null): NavGroup[] {
+  return filterNavForUser(user)
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => item.href !== '/'),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+export function hubGroupByKey(key: string, user: SessionUser | null): NavGroup | undefined {
+  return homeHubGroups(user).find((group) => navGroupKey(group.title) === key);
+}

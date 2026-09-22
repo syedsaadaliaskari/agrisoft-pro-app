@@ -1891,6 +1891,302 @@ export function dashboardSummary() {
   };
 }
 
+export type HubBar = { label: string; value: number };
+export type HubInsight = {
+  kpis: { label: string; value: string }[];
+  seriesTitle: string;
+  series: HubBar[];
+  mixTitle: string;
+  mix: HubBar[];
+  mixFormat?: 'money' | 'count';
+};
+
+function lastSevenDays() {
+  return [...Array(7)].map((_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return {
+      date: d.toISOString().slice(0, 10),
+      label: d.toLocaleDateString(undefined, { weekday: 'short' }),
+    };
+  });
+}
+
+function dayTotals(rows: { date: string; amount: number }[]): HubBar[] {
+  return lastSevenDays().map((day) => ({
+    label: day.label,
+    value: rows.filter((row) => row.date === day.date).reduce((sum, row) => sum + row.amount, 0),
+  }));
+}
+
+export function hubInsight(groupKey: string): HubInsight | null {
+  const t = today();
+  const month = t.slice(0, 7);
+  const sales = listSales().filter((r) => r.status === 'posted');
+  const purchases = listPurchases().filter((r) => r.status === 'posted');
+  const saleReturns = listSaleReturns().filter((r) => r.status === 'posted');
+  const purchaseReturns = listPurchaseReturns().filter((r) => r.status === 'posted');
+  const receipts = listVouchers('receipt').filter((r) => r.status === 'posted');
+  const payments = listVouchers('payment').filter((r) => r.status === 'posted');
+  const expenses = listVouchers('expense').filter((r) => r.status === 'posted');
+  const income = listVouchers('income').filter((r) => r.status === 'posted');
+  const inv = inventoryRows();
+
+  if (groupKey === 'sales') {
+    const todayRows = sales.filter((r) => r.invoiceDate === t);
+    const monthRows = sales.filter((r) => r.invoiceDate.startsWith(month));
+    const monthReturnRows = saleReturns.filter((r) => r.returnDate.startsWith(month));
+    const paid = monthRows.reduce((s, r) => s + r.paidAmount, 0);
+    const due = monthRows.reduce((s, r) => s + Math.max(0, r.grandTotal - r.paidAmount), 0);
+    return {
+      kpis: [
+        { label: 'Today sales', value: money(todayRows.reduce((s, r) => s + r.grandTotal, 0)) },
+        { label: 'Invoices', value: String(todayRows.length) },
+        { label: 'This month', value: money(monthRows.reduce((s, r) => s + r.grandTotal, 0)) },
+        { label: 'Due', value: money(due) },
+      ],
+      seriesTitle: 'Last 7 days',
+      series: dayTotals(sales.map((r) => ({ date: r.invoiceDate, amount: r.grandTotal }))),
+      mixTitle: 'This month',
+      mix: [
+        { label: 'Paid', value: paid },
+        { label: 'Due', value: due },
+        { label: 'Returns', value: monthReturnRows.reduce((s, r) => s + r.grandTotal, 0) },
+      ],
+    };
+  }
+
+  if (groupKey === 'purchases') {
+    const todayRows = purchases.filter((r) => r.invoiceDate === t);
+    const monthRows = purchases.filter((r) => r.invoiceDate.startsWith(month));
+    const monthReturnRows = purchaseReturns.filter((r) => r.returnDate.startsWith(month));
+    const paid = monthRows.reduce((s, r) => s + r.paidAmount, 0);
+    const due = monthRows.reduce((s, r) => s + Math.max(0, r.grandTotal - r.paidAmount), 0);
+    return {
+      kpis: [
+        { label: 'Today purchases', value: money(todayRows.reduce((s, r) => s + r.grandTotal, 0)) },
+        { label: 'Bills', value: String(todayRows.length) },
+        { label: 'This month', value: money(monthRows.reduce((s, r) => s + r.grandTotal, 0)) },
+        { label: 'Due', value: money(due) },
+      ],
+      seriesTitle: 'Last 7 days',
+      series: dayTotals(purchases.map((r) => ({ date: r.invoiceDate, amount: r.grandTotal }))),
+      mixTitle: 'This month',
+      mix: [
+        { label: 'Paid', value: paid },
+        { label: 'Due', value: due },
+        { label: 'Returns', value: monthReturnRows.reduce((s, r) => s + r.grandTotal, 0) },
+      ],
+    };
+  }
+
+  if (groupKey === 'parties') {
+    return {
+      kpis: [
+        { label: 'Customers', value: String(listCustomers().length) },
+        { label: 'Vendors', value: String(listVendors().length) },
+        { label: 'Today sales', value: money(sales.filter((r) => r.invoiceDate === t).reduce((s, r) => s + r.grandTotal, 0)) },
+        { label: 'Today purchases', value: money(purchases.filter((r) => r.invoiceDate === t).reduce((s, r) => s + r.grandTotal, 0)) },
+      ],
+      seriesTitle: 'Last 7 days sales',
+      series: dayTotals(sales.map((r) => ({ date: r.invoiceDate, amount: r.grandTotal }))),
+      mixTitle: 'Parties',
+      mixFormat: 'count',
+      mix: [
+        { label: 'Customers', value: listCustomers().length },
+        { label: 'Vendors', value: listVendors().length },
+      ],
+    };
+  }
+
+  if (groupKey === 'catalog') {
+    const low = inv.filter((r) => r.isLow).length;
+    const ok = Math.max(0, inv.length - low);
+    const categories = listCategories().map((cat) => ({
+      label: cat.name,
+      value: listProducts().filter((p) => p.categoryId === cat.id).length,
+    }));
+    return {
+      kpis: [
+        { label: 'Products', value: String(listProducts().length) },
+        { label: 'Low stock', value: String(low) },
+        { label: 'Items', value: String(inv.length) },
+        { label: 'Categories', value: String(listCategories().length) },
+      ],
+      seriesTitle: 'Products by category',
+      series: (categories.length ? categories : [{ label: 'All', value: listProducts().length }]).slice(0, 7),
+      mixTitle: 'Stock',
+      mixFormat: 'count',
+      mix: [
+        { label: 'In stock', value: ok },
+        { label: 'Low stock', value: low },
+      ],
+    };
+  }
+
+  if (groupKey === 'transactions') {
+    const monthSum = (rows: { voucherDate: string; grandTotal: number }[]) =>
+      rows.filter((r) => r.voucherDate.startsWith(month)).reduce((s, r) => s + r.grandTotal, 0);
+    return {
+      kpis: [
+        { label: 'Received', value: money(monthSum(receipts)) },
+        { label: 'Paid out', value: money(monthSum(payments)) },
+        { label: 'Expense', value: money(monthSum(expenses)) },
+        { label: 'Income', value: money(monthSum(income)) },
+      ],
+      seriesTitle: 'Last 7 days expenses',
+      series: dayTotals(expenses.map((r) => ({ date: r.voucherDate, amount: r.grandTotal }))),
+      mixTitle: 'This month',
+      mix: [
+        { label: 'Received', value: monthSum(receipts) },
+        { label: 'Paid out', value: monthSum(payments) },
+        { label: 'Expense', value: monthSum(expenses) },
+        { label: 'Income', value: monthSum(income) },
+      ],
+    };
+  }
+
+  if (groupKey === 'ledgers') {
+    let cash = 0;
+    let bank = 0;
+    try {
+      cash = accountBook('1100');
+    } catch {
+      cash = 0;
+    }
+    try {
+      bank = accountBook('1200');
+    } catch {
+      bank = 0;
+    }
+    const monthExp = expenses.filter((r) => r.voucherDate.startsWith(month)).reduce((s, r) => s + r.grandTotal, 0);
+    const monthInc = income.filter((r) => r.voucherDate.startsWith(month)).reduce((s, r) => s + r.grandTotal, 0);
+    return {
+      kpis: [
+        { label: 'Cash', value: money(cash) },
+        { label: 'Bank', value: money(bank) },
+        { label: 'Expense', value: money(monthExp) },
+        { label: 'Income', value: money(monthInc) },
+      ],
+      seriesTitle: 'Last 7 days expenses',
+      series: dayTotals(expenses.map((r) => ({ date: r.voucherDate, amount: r.grandTotal }))),
+      mixTitle: 'Balances',
+      mix: [
+        { label: 'Cash', value: Math.max(0, cash) },
+        { label: 'Bank', value: Math.max(0, bank) },
+        { label: 'Expense', value: monthExp },
+        { label: 'Income', value: monthInc },
+      ],
+    };
+  }
+
+  if (groupKey === 'reports') {
+    const weekProfit = lastSevenDays().map((day) => {
+      const p = profitReport(day.date, day.date);
+      return { label: day.label, value: p.profit };
+    });
+    const monthPl = profitReport(`${month}-01`, t);
+    return {
+      kpis: [
+        { label: 'Profit loss', value: money(profitReport(t, t).profit) },
+        { label: 'This month', value: money(monthPl.profit) },
+        { label: 'Sales', value: money(monthPl.sales) },
+        { label: 'Purchases', value: money(monthPl.purchases) },
+      ],
+      seriesTitle: 'Last 7 days profit loss',
+      series: weekProfit,
+      mixTitle: 'This month',
+      mix: [
+        { label: 'Sales', value: monthPl.sales },
+        { label: 'Purchases', value: monthPl.purchases },
+        { label: 'Income', value: monthPl.income },
+        { label: 'Expense', value: monthPl.expenses },
+      ],
+    };
+  }
+
+  return null;
+}
+
+export type HubTrendPoint = { date: string; label: string; total: number };
+export type HubTrend = {
+  title: string;
+  aLabel: string;
+  bLabel: string;
+  a: HubTrendPoint[];
+  b: HubTrendPoint[];
+};
+
+function trendPoints(rows: { date: string; amount: number }[]): HubTrendPoint[] {
+  return lastSevenDays().map((day) => ({
+    date: day.date,
+    label: day.label,
+    total: rows.filter((row) => row.date === day.date).reduce((sum, row) => sum + row.amount, 0),
+  }));
+}
+
+export function hubTrend(groupKey: string): HubTrend | null {
+  const sales = listSales().filter((r) => r.status === 'posted');
+  const purchases = listPurchases().filter((r) => r.status === 'posted');
+  const saleReturns = listSaleReturns().filter((r) => r.status === 'posted');
+  const purchaseReturns = listPurchaseReturns().filter((r) => r.status === 'posted');
+  const receipts = listVouchers('receipt').filter((r) => r.status === 'posted');
+  const payments = listVouchers('payment').filter((r) => r.status === 'posted');
+  const expenses = listVouchers('expense').filter((r) => r.status === 'posted');
+  const income = listVouchers('income').filter((r) => r.status === 'posted');
+  const salePts = trendPoints(sales.map((r) => ({ date: r.invoiceDate, amount: r.grandTotal })));
+  const saleReturnPts = trendPoints(saleReturns.map((r) => ({ date: r.returnDate, amount: r.grandTotal })));
+  const purchasePts = trendPoints(purchases.map((r) => ({ date: r.invoiceDate, amount: r.grandTotal })));
+  const purchaseReturnPts = trendPoints(purchaseReturns.map((r) => ({ date: r.returnDate, amount: r.grandTotal })));
+
+  if (groupKey === 'sales' || groupKey === 'catalog') {
+    return { title: 'Sale vs return', aLabel: 'Sale', bLabel: 'Returned', a: salePts, b: saleReturnPts };
+  }
+  if (groupKey === 'purchases') {
+    return { title: 'Purchase vs return', aLabel: 'Purchase', bLabel: 'Returned', a: purchasePts, b: purchaseReturnPts };
+  }
+  if (groupKey === 'parties' || groupKey === 'reports') {
+    return { title: 'Sale vs purchase', aLabel: 'Sale', bLabel: 'Purchase', a: salePts, b: purchasePts };
+  }
+  if (groupKey === 'transactions') {
+    return {
+      title: 'Received vs paid',
+      aLabel: 'Received',
+      bLabel: 'Paid out',
+      a: trendPoints(receipts.map((r) => ({ date: r.voucherDate, amount: r.grandTotal }))),
+      b: trendPoints(payments.map((r) => ({ date: r.voucherDate, amount: r.grandTotal }))),
+    };
+  }
+  if (groupKey === 'ledgers') {
+    return {
+      title: 'Income vs expense',
+      aLabel: 'Income',
+      bLabel: 'Expense',
+      a: trendPoints(income.map((r) => ({ date: r.voucherDate, amount: r.grandTotal }))),
+      b: trendPoints(expenses.map((r) => ({ date: r.voucherDate, amount: r.grandTotal }))),
+    };
+  }
+  return null;
+}
+
+export function shopPieMix(): HubBar[] {
+  const t = today();
+  const month = t.slice(0, 7);
+  const inMonth = (date: string) => date.startsWith(month);
+  const sum = (rows: { grandTotal: number }[]) => rows.reduce((s, r) => s + r.grandTotal, 0);
+  return [
+    { label: 'Sales', value: sum(listSales().filter((r) => r.status === 'posted' && inMonth(r.invoiceDate))) },
+    { label: 'Sale return', value: sum(listSaleReturns().filter((r) => r.status === 'posted' && inMonth(r.returnDate))) },
+    { label: 'Purchases', value: sum(listPurchases().filter((r) => r.status === 'posted' && inMonth(r.invoiceDate))) },
+    {
+      label: 'Purchase return',
+      value: sum(listPurchaseReturns().filter((r) => r.status === 'posted' && inMonth(r.returnDate))),
+    },
+    { label: 'Expense', value: sum(listVouchers('expense').filter((r) => r.status === 'posted' && inMonth(r.voucherDate))) },
+    { label: 'Income', value: sum(listVouchers('income').filter((r) => r.status === 'posted' && inMonth(r.voucherDate))) },
+  ];
+}
+
 export function getShopSnapshot() {
   return store;
 }
