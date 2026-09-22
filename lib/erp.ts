@@ -1855,6 +1855,13 @@ export function dashboardSummary() {
   } catch {
     bankBalance = 0;
   }
+  let ownerDraw = 0;
+  try {
+    ownerDraw = accountBook('3200');
+  } catch {
+    ownerDraw = 0;
+  }
+  const todayProfit = profitReport(t, t).profit;
   const points = [...Array(7)].map((_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - (6 - i));
@@ -1878,6 +1885,8 @@ export function dashboardSummary() {
     lowStockCount: inv.filter((r) => r.isLow).length,
     cashBalance,
     bankBalance,
+    ownerDraw,
+    todayProfit,
     points,
   };
 }

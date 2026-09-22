@@ -65,8 +65,7 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
-        <AppLogo size={80} />
-        <Text style={[styles.title, { color: colors.text }]}>{t('brand.name')}</Text>
+        <AppLogo size={220} variant="lockup" />
         <Text style={[styles.sub, { color: colors.muted }]}>
           {mode === 'create' ? t('login.create') : t('login.signIn')}
         </Text>
@@ -123,7 +122,6 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: tokens.bg },
   inner: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
-  title: { ...font, fontSize: 26, fontWeight: '600', marginTop: 8 },
   sub: { ...font, fontSize: typeScale.body },
   switch: { ...font, fontSize: typeScale.label, fontWeight: '600', marginBottom: 4 },
   input: {

@@ -14,8 +14,7 @@ export function SignInScreen() {
 
   return (
     <SafeAreaView style={[styles.screen, { backgroundColor: colors.background }]}>
-      <AppLogo size={88} />
-      <Text style={[styles.title, { color: colors.text }]}>Agri Soft Pro</Text>
+      <AppLogo size={220} variant="lockup" />
       <Text style={[styles.subtitle, { color: colors.muted }]}>Sign in to this shop</Text>
       <TextInput
         value={name}
@@ -45,11 +44,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     padding: 24,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    marginTop: 8,
   },
   subtitle: {
     fontSize: 16,
