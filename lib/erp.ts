@@ -875,12 +875,15 @@ export function inventoryRows() {
       variantId: variant.id,
       productId: product.id,
       name: product.name,
+      pack: variant.size,
+      grade: variant.color,
       detail: [variant.size, variant.color].filter(Boolean).join(' · '),
       stockQty: variant.stockQty,
       salePrice: variant.salePrice || product.salePrice,
       costPrice: variant.costPrice || product.costPrice,
       reorderLevel: product.reorderLevel,
       isLow: variant.stockQty <= product.reorderLevel,
+      isActive: product.isActive,
     })),
   );
 }
@@ -919,6 +922,7 @@ export async function upsertNamed(
     isActive: input.isActive ?? existing?.isActive ?? true,
   };
   await saveNamed(table, row, !existing);
+  return row;
 }
 
 export async function removeNamed(

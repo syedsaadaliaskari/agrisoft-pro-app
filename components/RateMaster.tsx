@@ -46,7 +46,7 @@ export function RateMaster({ kind, title }: { kind: Kind; title: string }) {
   return (
     <ScreenGate permission="settings.manage">
       <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.content}>
-        <PrimaryButton label={`Add ${title.toLowerCase()}`} color={colors.tint} onPress={() => start()} />
+        <PrimaryButton label={`New ${title.toLowerCase()}`} color={colors.tint} onPress={() => start()} />
         {rows.map((row) => (
           <View key={row.id} style={[styles.row, cardShadow, { backgroundColor: colors.card }]}>
             <View style={{ flex: 1 }}>

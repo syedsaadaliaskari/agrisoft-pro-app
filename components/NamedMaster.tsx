@@ -16,7 +16,7 @@ type Props = {
   managePermission?: string;
   title: string;
   load: () => Promise<NamedRow[]>;
-  onCreate?: (name: string) => Promise<void>;
+  onCreate?: (name: string) => Promise<unknown>;
   subtitle?: (row: NamedRow) => string;
 };
 
@@ -52,7 +52,7 @@ export function NamedMaster({ permission, managePermission, title, load, onCreat
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
         {canManage && onCreate ? (
           <View style={styles.head}>
-            <PrimaryButton label={`Add ${title.toLowerCase()}`} color={colors.tint} onPress={() => setOpen(true)} />
+            <PrimaryButton label={`New ${title.toLowerCase()}`} color={colors.tint} onPress={() => setOpen(true)} />
           </View>
         ) : null}
         {error ? (
@@ -76,7 +76,7 @@ export function NamedMaster({ permission, managePermission, title, load, onCreat
         <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
           <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
             <Pressable style={[styles.sheet, { backgroundColor: colors.card }]} onPress={() => {}}>
-              <Text style={[styles.name, { color: colors.text }]}>Add {title.toLowerCase()}</Text>
+              <Text style={[styles.name, { color: colors.text }]}>New {title.toLowerCase()}</Text>
               <TextInput
                 value={name}
                 onChangeText={setName}

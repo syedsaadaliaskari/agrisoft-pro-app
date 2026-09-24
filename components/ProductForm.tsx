@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Href, Stack, useRouter } from 'expo-router';
 
-import { Card, Field, PickRow } from '@/components/FormKit';
+import { CatalogPickField } from '@/components/CatalogPickField';
+import { Card, Field } from '@/components/FormKit';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -14,30 +15,31 @@ import {
   money,
   removeProduct,
   saveProduct,
+  subscribeErp,
+  upsertNamed,
 } from '@/lib/erp';
+import { hasPermission } from '@/lib/permissions';
+import { getSession } from '@/lib/rbac';
 
-type Pack = { id?: string; size: string; color: string; barcode: string; stockQty: string; salePrice: string; costPrice: string };
+type Pack = { id?: string; size: string; color: string; stockQty: string };
 
 export function ProductForm({ productId }: { productId?: string }) {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const router = useRouter();
   const existing = productId ? getProduct(productId) : null;
+  const canManage = hasPermission(getSession(), 'products.manage');
+  const [, tick] = useState(0);
+  useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
   const categories = listCategories();
   const units = listUnits();
   const taxes = listTaxes();
   const [name, setName] = useState(existing?.name ?? '');
-  const [barcode, setBarcode] = useState(existing?.barcode ?? '');
-  const [description, setDescription] = useState(existing?.description ?? '');
-  const [brand, setBrand] = useState(existing?.brand ?? '');
-  const [gender, setGender] = useState(existing?.gender ?? '');
-  const [season, setSeason] = useState(existing?.season ?? '');
   const [categoryId, setCategoryId] = useState(existing?.categoryId ?? '');
   const [unitId, setUnitId] = useState(existing?.unitId ?? '');
   const [taxId, setTaxId] = useState(existing?.taxId ?? '');
   const [salePrice, setSalePrice] = useState(String(existing?.salePrice ?? ''));
   const [costPrice, setCostPrice] = useState(String(existing?.costPrice ?? ''));
-  const [wholesale, setWholesale] = useState(String(existing?.wholesalePrice ?? ''));
   const [reorder, setReorder] = useState(String(existing?.reorderLevel ?? 5));
   const [initialStock, setInitialStock] = useState('0');
   const [packs, setPacks] = useState<Pack[]>(
@@ -46,34 +48,62 @@ export function ProductForm({ productId }: { productId?: string }) {
           id: v.id,
           size: v.size,
           color: v.color,
-          barcode: v.barcode,
           stockQty: String(v.stockQty),
-          salePrice: String(v.salePrice),
-          costPrice: String(v.costPrice),
         }))
-      : [{ size: '', color: '', barcode: '', stockQty: '0', salePrice: '', costPrice: '' }],
+      : [{ size: '', color: '', stockQty: '0' }],
   );
-  const [pick, setPick] = useState<'category' | 'unit' | 'tax' | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const goToBooks = () => router.replace('/catalog/products' as Href);
 
   return (
     <>
       <Stack.Screen options={{ title: existing ? existing.name : 'New product' }} />
-      <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 40 }}>
         <Card>
-          {existing ? <Field label="SKU" value={existing.sku} onChangeText={() => {}} editable={false} /> : null}
           <Field label="Name" value={name} onChangeText={setName} />
-          <Field label="Barcode" value={barcode} onChangeText={setBarcode} />
-          <Field label="Brand" value={brand} onChangeText={setBrand} />
-          <Field label="Description" value={description} onChangeText={setDescription} multiline />
-          <PickRow label="Category" selected={categories.find((c) => c.id === categoryId)?.name ?? ''} onPress={() => setPick('category')} />
-          <PickRow label="Unit" selected={units.find((c) => c.id === unitId)?.name ?? ''} onPress={() => setPick('unit')} />
-          <PickRow label="Tax" selected={taxes.find((c) => c.id === taxId)?.name ?? ''} onPress={() => setPick('tax')} />
-          <Field label="Gender" value={gender} onChangeText={setGender} />
-          <Field label="Season" value={season} onChangeText={setSeason} />
-          <Field label="Sale price" value={salePrice} onChangeText={setSalePrice} keyboardType="decimal-pad" />
+          <CatalogPickField
+            label="Category"
+            selected={categories.find((c) => c.id === categoryId)?.name ?? ''}
+            options={categories}
+            onSelect={setCategoryId}
+            canManage={canManage}
+            onCreate={async (value) => {
+              const row = await upsertNamed('categories', { name: value });
+              return row.id;
+            }}
+          />
+          <CatalogPickField
+            label="Unit"
+            selected={units.find((c) => c.id === unitId)?.name ?? ''}
+            options={units.map((u) => ({ id: u.id, name: `${u.name}${u.shortName ? ` (${u.shortName})` : ''}` }))}
+            onSelect={setUnitId}
+            canManage={canManage}
+            extraFields={[{ key: 'shortName', label: 'Short name' }]}
+            onCreate={async (value, extra) => {
+              const row = await upsertNamed('units', {
+                name: value,
+                shortName: extra?.shortName?.trim() || value.slice(0, 6),
+              });
+              return row.id;
+            }}
+          />
+          <CatalogPickField
+            label="Tax"
+            selected={taxes.find((c) => c.id === taxId)?.name ?? ''}
+            options={taxes.map((t) => ({ id: t.id, name: `${t.name}${t.rate != null ? ` (${t.rate}%)` : ''}` }))}
+            onSelect={setTaxId}
+            canManage={canManage}
+            extraFields={[{ key: 'rate', label: 'Rate %', keyboardType: 'decimal-pad' }]}
+            onCreate={async (value, extra) => {
+              const row = await upsertNamed('taxes', { name: value, rate: Number(extra?.rate) || 0 });
+              return row.id;
+            }}
+          />
           <Field label="Cost price" value={costPrice} onChangeText={setCostPrice} keyboardType="decimal-pad" />
-          <Field label="Wholesale price" value={wholesale} onChangeText={setWholesale} keyboardType="decimal-pad" />
+          <Field label="Sale price" value={salePrice} onChangeText={setSalePrice} keyboardType="decimal-pad" />
           <Field label="Reorder level" value={reorder} onChangeText={setReorder} keyboardType="decimal-pad" />
           {!existing ? (
             <Field
@@ -90,23 +120,18 @@ export function ProductForm({ productId }: { productId?: string }) {
             </Text>
           ) : null}
         </Card>
-        <Card title="Packs (size / color)">
+        <Card title="Packs">
           {packs.map((pack, index) => (
             <View key={pack.id ?? String(index)} style={{ gap: 8, paddingBottom: 12 }}>
               <Field
-                label="Size"
+                label="Pack"
                 value={pack.size}
                 onChangeText={(v) => setPacks((cur) => cur.map((p, i) => (i === index ? { ...p, size: v } : p)))}
               />
               <Field
-                label="Color"
+                label="Grade"
                 value={pack.color}
                 onChangeText={(v) => setPacks((cur) => cur.map((p, i) => (i === index ? { ...p, color: v } : p)))}
-              />
-              <Field
-                label="Barcode"
-                value={pack.barcode}
-                onChangeText={(v) => setPacks((cur) => cur.map((p, i) => (i === index ? { ...p, barcode: v } : p)))}
               />
               {existing || index > 0 ? (
                 <Field
@@ -127,43 +152,37 @@ export function ProductForm({ productId }: { productId?: string }) {
             label="Add pack"
             tone="ghost"
             color={colors.tint}
-            onPress={() => setPacks((cur) => [...cur, { size: '', color: '', barcode: '', stockQty: '0', salePrice: salePrice, costPrice: costPrice }])}
+            onPress={() => setPacks((cur) => [...cur, { size: '', color: '', stockQty: '0' }])}
           />
         </Card>
         {error ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{error}</Text> : null}
         <PrimaryButton
           label="Save product"
           color={colors.tint}
+          textColor={colors.logoInk}
           onPress={async () => {
             setError(null);
             try {
               await saveProduct({
                 id: productId,
                 name,
-                barcode,
-                description,
-                brand,
-                gender,
-                season,
                 categoryId: categoryId || null,
                 unitId: unitId || null,
                 taxId: taxId || null,
                 salePrice: Number(salePrice) || 0,
                 costPrice: Number(costPrice) || 0,
-                wholesalePrice: Number(wholesale) || 0,
                 reorderLevel: Number(reorder) || 0,
                 initialStock: existing ? undefined : Number(initialStock),
                 variants: packs.map((pack, index) => ({
                   id: pack.id,
                   size: pack.size,
                   color: pack.color,
-                  barcode: pack.barcode,
                   stockQty: !existing && index === 0 ? Number(initialStock) : Number(pack.stockQty) || 0,
                   salePrice: Number(salePrice) || 0,
                   costPrice: Number(costPrice) || 0,
                 })),
               });
-              router.back();
+              goToBooks();
             } catch (err) {
               setError(err instanceof Error ? err.message : "Couldn't save.");
             }
@@ -179,28 +198,11 @@ export function ProductForm({ productId }: { productId?: string }) {
                 {
                   text: 'Delete',
                   style: 'destructive',
-                  onPress: () => void removeProduct(existing.id).then(() => router.back()),
+                  onPress: () => void removeProduct(existing.id).then(goToBooks),
                 },
               ])
             }
           />
-        ) : null}
-        {pick ? (
-          <Card title={pick === 'category' ? 'Category' : pick === 'unit' ? 'Unit' : 'Tax'}>
-            {(pick === 'category' ? categories : pick === 'unit' ? units : taxes).map((row) => (
-              <Pressable
-                key={row.id}
-                onPress={() => {
-                  if (pick === 'category') setCategoryId(row.id);
-                  else if (pick === 'unit') setUnitId(row.id);
-                  else setTaxId(row.id);
-                  setPick(null);
-                }}
-                style={{ minHeight: 44, justifyContent: 'center' }}>
-                <Text style={{ color: colors.text, fontWeight: '700' }}>{row.name}</Text>
-              </Pressable>
-            ))}
-          </Card>
         ) : null}
       </ScrollView>
     </>

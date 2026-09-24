@@ -1,15 +1,14 @@
 import { Href, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { EmptyState } from '@/components/EmptyState';
-import { ListRow } from '@/components/ListRow';
+import { CatalogBooks } from '@/components/CatalogBooks';
 import { ScreenGate } from '@/components/ScreenGate';
 import { SearchBar } from '@/components/SearchBar';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import { listProducts, money, subscribeErp } from '@/lib/erp';
+import { listCategories, listProducts, listUnits, subscribeErp } from '@/lib/erp';
 import { askExport } from '@/lib/exportShare';
 import { hasPermission } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
@@ -21,20 +20,36 @@ export default function ProductsScreen() {
   const [, tick] = useState(0);
   useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
   const [query, setQuery] = useState('');
-  const rows = listProducts();
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => `${r.name} ${r.sku} ${r.brand}`.toLowerCase().includes(q));
-  }, [query, rows]);
+  const products = listProducts();
+  const categories = listCategories();
+  const units = listUnits();
+  const exportRows = useMemo(
+    () =>
+      products.map((product) => ({
+        name: product.name,
+        category: categories.find((c) => c.id === product.categoryId)?.name ?? '',
+        unit: units.find((u) => u.id === product.unitId)?.name ?? '',
+        costPrice: product.costPrice,
+        salePrice: product.salePrice,
+        stock: product.variants.reduce((sum, variant) => sum + variant.stockQty, 0),
+        packs: product.variants.length,
+        status: product.isActive ? 'Active' : 'Inactive',
+      })),
+    [products, categories, units],
+  );
 
   return (
     <ScreenGate permission="products.view">
       <View style={[styles.screen, { backgroundColor: colors.background }]}>
-        <View style={{ padding: 16, gap: 10 }}>
-          <SearchBar value={query} onChangeText={setQuery} placeholder="Search by name" />
+        <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }}>
+          <SearchBar value={query} onChangeText={setQuery} placeholder="Search products" />
           {hasPermission(getSession(), 'products.manage') ? (
-            <PrimaryButton label="Add product" color={colors.tint} onPress={() => router.push('/product/new' as Href)} />
+            <PrimaryButton
+              label="Add product"
+              color={colors.tint}
+              textColor={colors.logoInk}
+              onPress={() => router.push('/product/new' as Href)}
+            />
           ) : null}
           <PrimaryButton
             label="Export"
@@ -42,34 +57,24 @@ export default function ProductsScreen() {
             color={colors.tint}
             onPress={() =>
               askExport({
-                filename: 'products',
-                title: 'Products',
+                filename: 'catalog',
+                title: 'Catalog',
                 columns: [
-                  { key: 'sku', label: 'SKU' },
                   { key: 'name', label: 'Name' },
-                  { key: 'brand', label: 'Brand' },
-                  { key: 'salePrice', label: 'Sale' },
+                  { key: 'category', label: 'Category' },
+                  { key: 'unit', label: 'Unit' },
                   { key: 'costPrice', label: 'Cost' },
+                  { key: 'salePrice', label: 'Sale' },
+                  { key: 'stock', label: 'Stock' },
+                  { key: 'packs', label: 'Packs' },
+                  { key: 'status', label: 'Status' },
                 ],
-                rows: visible,
+                rows: exportRows,
               })
             }
           />
-        </View>
-        <FlatList
-          data={visible}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          ListEmptyComponent={<EmptyState title="No products" />}
-          renderItem={({ item }) => (
-            <ListRow
-              title={item.name}
-              subtitle={`${money(item.salePrice)} · stock ${item.variants.reduce((s, v) => s + v.stockQty, 0)}`}
-              onPress={() => router.push(`/product/${item.id}` as Href)}
-            />
-          )}
-        />
+          <CatalogBooks query={query} />
+        </ScrollView>
       </View>
     </ScreenGate>
   );
