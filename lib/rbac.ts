@@ -316,6 +316,20 @@ export async function signOut(): Promise<void> {
   }
 }
 
+/** Leave the shop screens when the trial ends. Shop books stay on the phone. */
+export async function endShopSession(): Promise<void> {
+  session = null;
+  await AsyncStorage.removeItem(SESSION_KEY);
+  emit();
+  try {
+    const { getSupabase } = await import('@/lib/supabase');
+    const client = getSupabase();
+    if (client) await client.auth.signOut();
+  } catch {
+    /* the lock still holds if cloud sign-out fails */
+  }
+}
+
 export function listRoles(): RoleRow[] {
   return store.roles;
 }

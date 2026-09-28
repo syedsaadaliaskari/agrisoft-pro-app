@@ -39,12 +39,20 @@ export async function joinShop(shopCode: string) {
     throw new Error(describeAuthError(error, "Couldn't join that shop."));
   }
   const tenantId = typeof data === 'string' && data.trim() ? data.trim() : code;
-  const { resetLocalShopBooks } = await import('@/lib/erp');
+  const { localShopHasWork, resetLocalShopBooks } = await import('@/lib/erp');
   const { resetCloudPullState } = await import('@/lib/cloudSync');
   const { clearTombstones } = await import('@/lib/tombstones');
-  await resetLocalShopBooks();
-  await resetCloudPullState();
-  await clearTombstones();
+  const current = (await AsyncStorage.getItem(TENANT_KEY))?.trim() || '';
+  const hasWork = localShopHasWork();
+  if (current && current !== tenantId && hasWork) {
+    throw new Error('This phone already has shop data. Leave the shop code empty to keep it.');
+  }
+  const sameShop = Boolean(current) && current === tenantId;
+  if (!(sameShop || (!current && hasWork))) {
+    await resetLocalShopBooks();
+    await resetCloudPullState();
+    await clearTombstones();
+  }
   await rememberTenant(tenantId);
   return tenantId;
 }
@@ -115,8 +123,8 @@ export async function signInShopAccount(input: { email: string; password: string
   if (error) throw new Error(describeAuthError(error, "Couldn't sign in."));
 
   const code = input.shopCode?.trim() || '';
-  if (!code) throw new Error('Enter the shop code.');
-  const tenantId = await joinShop(code);
+  const tenantId = code ? await joinShop(code) : await loadMembership();
+  if (!tenantId) throw new Error('Enter the shop code.');
   await startCloudShopSession(email);
   return tenantId;
 }

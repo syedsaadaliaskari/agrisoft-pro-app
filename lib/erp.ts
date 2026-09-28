@@ -748,6 +748,17 @@ function migrateStore() {
   for (const voucher of store.vouchers) bumpCounter(voucher.voucherType, [voucher.voucherNo]);
 }
 
+/** True when this phone already has real shop work, not just the empty seed. */
+export function localShopHasWork() {
+  return (
+    store.customers.length > 0 ||
+    store.vendors.length > 0 ||
+    store.products.length > 0 ||
+    store.sales.length > 0 ||
+    store.purchases.length > 0
+  );
+}
+
 /** Drop phone-only leftover books so the next cloud pull matches this shop. */
 export async function resetLocalShopBooks() {
   skipPersistHook = true;

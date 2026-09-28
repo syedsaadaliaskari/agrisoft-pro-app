@@ -70,6 +70,42 @@ async function hmacSha256(message: string): Promise<Uint8Array> {
   return new Uint8Array(sig);
 }
 
+export type ActivationPayload = ActivationPayloadV1 | ActivationPayloadV2;
+
+function base64UrlToBytes(value: string): Uint8Array {
+  const pad = value.length % 4 === 0 ? '' : '='.repeat(4 - (value.length % 4));
+  const std = value.replace(/-/g, '+').replace(/_/g, '/') + pad;
+  const binary = globalThis.atob(std);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** Check a vendor code. The caller still matches it to this phone's Install ID. */
+export async function readActivationPayload(rawCode: string): Promise<ActivationPayload> {
+  const code = rawCode.trim().replace(/\s+/g, '');
+  const parts = code.split('.');
+  if (parts.length !== 3 || parts[0] !== 'ASP1') {
+    throw new Error('Invalid activation code');
+  }
+  const [, body, sig] = parts;
+  const expected = bytesToBase64Url(await hmacSha256(body)).slice(0, 24);
+  if (sig !== expected) throw new Error('Invalid or tampered activation code');
+  let payload: ActivationPayload;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(base64UrlToBytes(body))) as ActivationPayload;
+  } catch {
+    throw new Error('Invalid activation code');
+  }
+  if ((payload?.v !== 1 && payload?.v !== 2) || !payload.installId || !payload.plan) {
+    throw new Error('Invalid activation code');
+  }
+  if (!['monthly', 'yearly', 'forever'].includes(payload.plan)) {
+    throw new Error('Invalid plan in activation code');
+  }
+  return payload;
+}
+
 export async function buildActivationCode(
   row: Pick<LicenseRow, 'installId' | 'name' | 'plan' | 'activatedAt' | 'expiresAt' | 'tenantId'>,
 ): Promise<string> {

@@ -5,7 +5,9 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { font, typeScale } from '@/constants/theme';
 import { subscribeLocale, tNav } from '@/lib/i18n';
+import { shopLicenseAllowed } from '@/lib/deviceLicense';
 import { getSession, subscribeSession } from '@/lib/rbac';
+import { isVendorUnlocked } from '@/lib/vendorUnlock';
 
 export default function AppLayout() {
   const scheme = useColorScheme() ?? 'light';
@@ -19,6 +21,9 @@ export default function AppLayout() {
       b();
     };
   }, []);
+  if (!isVendorUnlocked() && !shopLicenseAllowed()) {
+    return <Redirect href="/activate" />;
+  }
   if (!getSession()) {
     return <Redirect href="/login" />;
   }

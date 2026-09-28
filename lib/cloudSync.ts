@@ -82,14 +82,95 @@ async function fetchTable<T>(table: string): Promise<T[]> {
   return out;
 }
 
-async function upsertTable(table: string, rows: Record<string, unknown>[]) {
+/** Existing cloud row ids, including soft-deleted rows that still hold the unique key. */
+async function remoteIdsBy(table: string, keyOf: (row: Record<string, unknown>) => string): Promise<Record<string, string>> {
+  const { client, tenantId } = requireCloud();
+  const ids: Record<string, string> = {};
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await client.from(table).select('*').eq('tenant_id', tenantId).range(from, from + PAGE - 1);
+    if (error) throw new Error(describeError(error, `Couldn't read ${table}.`));
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    for (const row of rows) {
+      const key = keyOf(row);
+      const id = text(row.id);
+      if (key && id) ids[key] = id;
+    }
+    if (rows.length < PAGE) break;
+  }
+  return ids;
+}
+
+function remoteRowIds(table: string, keyColumn: string) {
+  return remoteIdsBy(table, (row) => text(row[keyColumn]));
+}
+
+/** Point phone rows at the cloud row that already owns this shop key, and remember the id change. */
+async function bindCloudIds(table: string, keyColumn: string, rows: Record<string, unknown>[]) {
+  const remote = await remoteRowIds(table, keyColumn);
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    const localId = text(row.id);
+    const cloudId = remote[text(row[keyColumn])];
+    if (!localId || !cloudId) continue;
+    row.id = cloudId;
+    map.set(localId, cloudId);
+  }
+  return map;
+}
+
+function cloudRef(value: unknown, ...maps: Map<string, string>[]) {
+  const id = text(value);
+  if (!id) return null;
+  for (const map of maps) {
+    const next = map.get(id);
+    if (next) return next;
+  }
+  return id;
+}
+
+async function saveRowsByNaturalKey(table: string, keyColumn: string, rows: Record<string, unknown>[]) {
   if (!rows.length) return;
+  const remote = await remoteRowIds(table, keyColumn);
+  const { client, tenantId } = requireCloud();
+  for (const row of rows) {
+    const key = text(row[keyColumn]);
+    const { id: _id, created_at: _created, ...patch } = row;
+    const remoteId = remote[key];
+    if (remoteId) {
+      const { error } = await client.from(table).update(patch).eq('id', remoteId).eq('tenant_id', tenantId);
+      if (error) throw new Error(describeError(error, `Couldn't save ${table}.`));
+      continue;
+    }
+    const updated = await client.from(table).update(patch).eq('tenant_id', tenantId).eq(keyColumn, key).select('id');
+    if (updated.error) throw new Error(describeError(updated.error, `Couldn't save ${table}.`));
+    if ((updated.data ?? []).length > 0) continue;
+    const inserted = await client.from(table).insert(row);
+    if (isRowConflict(inserted.error)) continue;
+    if (inserted.error) throw new Error(describeError(inserted.error, `Couldn't save ${table}.`));
+  }
+}
+
+function isRowConflict(error: { message?: string; code?: string; details?: string } | null) {
+  if (!error) return false;
+  const blob = `${error.code || ''} ${error.message || ''} ${error.details || ''}`;
+  return error.code === '23505' || /duplicate key|unique constraint|row-level security|23505/i.test(blob);
+}
+
+async function upsertTable(table: string, rows: Record<string, unknown>[], keyColumn?: string) {
+  const idMap = keyColumn ? await bindCloudIds(table, keyColumn, rows) : new Map<string, string>();
+  if (!rows.length) return idMap;
+  if (keyColumn) {
+    await saveRowsByNaturalKey(table, keyColumn, rows);
+    return idMap;
+  }
   const { client } = requireCloud();
   for (let i = 0; i < rows.length; i += BATCH) {
     const chunk = rows.slice(i, i + BATCH);
     const { error } = await client.from(table).upsert(chunk, { onConflict: 'id' });
+    if (error && isRowConflict(error)) continue;
     if (error) throw new Error(describeError(error, `Couldn't save ${table}.`));
   }
+  return idMap;
 }
 
 async function pushTombstones() {
@@ -170,14 +251,6 @@ function partyFrom(
 }
 
 export async function pullShopFromCloud() {
-  if (cloudReady && getSyncStatus().pendingPush) {
-    try {
-      await pushShopToCloud();
-    } catch {
-      return;
-    }
-    if (getSyncStatus().pendingPush) return;
-  }
   const { tenantId } = requireCloud();
   const [
     settings,
@@ -579,11 +652,10 @@ export async function pushShopToCloud() {
       'currency_code',
       'tax_mode',
       'receipt_footer',
-      'n8n_enabled',
-      'n8n_webhook_url',
     ];
+    const remoteSettingIds = await remoteRowIds('settings', 'key');
     const settings = settingsKeys.map((key) => {
-      shop.settingIds[key] = shop.settingIds[key] || newId();
+      shop.settingIds[key] = remoteSettingIds[key] || shop.settingIds[key] || newId();
       return {
         id: shop.settingIds[key],
         tenant_id: tenantId,
@@ -596,13 +668,13 @@ export async function pushShopToCloud() {
       };
     });
 
-    await upsertTable('settings', settings);
-    await upsertTable('units', namedPayload('units', shop.units.filter((row) => row.isActive), tenantId, now).map(stripUndef));
-    await upsertTable('categories', namedPayload('categories', shop.categories.filter((row) => row.isActive), tenantId, now).map(stripUndef));
-    await upsertTable('taxes', namedPayload('taxes', shop.taxes.filter((row) => row.isActive), tenantId, now).map(stripUndef));
-    await upsertTable('discounts', namedPayload('discounts', shop.discounts.filter((row) => row.isActive), tenantId, now).map(stripUndef));
-    await upsertTable('additions', namedPayload('additions', shop.additions.filter((row) => row.isActive), tenantId, now).map(stripUndef));
-    await upsertTable(
+    await saveRowsByNaturalKey('settings', 'key', settings);
+    const unitIds = await upsertTable('units', namedPayload('units', shop.units.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
+    const categoryIds = await upsertTable('categories', namedPayload('categories', shop.categories.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
+    const taxIds = await upsertTable('taxes', namedPayload('taxes', shop.taxes.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
+    await upsertTable('discounts', namedPayload('discounts', shop.discounts.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
+    await upsertTable('additions', namedPayload('additions', shop.additions.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
+    const customerIds = await upsertTable(
       'customers',
       shop.customers
         .filter((row) => row.isActive && !isTombstoned('customers', row.id))
@@ -623,8 +695,9 @@ export async function pushShopToCloud() {
         updated_at: row.updatedAt || now,
         deleted_at: null,
       })),
+      'code',
     );
-    await upsertTable(
+    const vendorIds = await upsertTable(
       'vendors',
       shop.vendors
         .filter((row) => row.isActive && !isTombstoned('vendors', row.id))
@@ -644,8 +717,9 @@ export async function pushShopToCloud() {
         updated_at: row.updatedAt || now,
         deleted_at: null,
       })),
+      'code',
     );
-    await upsertTable(
+    const accountIds = await upsertTable(
       'accounts',
       shop.accounts.map((row) => ({
         id: row.id,
@@ -661,8 +735,9 @@ export async function pushShopToCloud() {
         updated_at: now,
         deleted_at: null,
       })),
+      'code',
     );
-    await upsertTable(
+    const productIds = await upsertTable(
       'products',
       shop.products
         .filter((row) => row.isActive && !isTombstoned('products', row.id))
@@ -673,23 +748,24 @@ export async function pushShopToCloud() {
         barcode: row.barcode || null,
         name: row.name,
         description: row.description || null,
-        category_id: row.categoryId,
-        unit_id: row.unitId,
+        category_id: cloudRef(row.categoryId, categoryIds),
+        unit_id: cloudRef(row.unitId, unitIds),
         brand: row.brand || null,
         gender: row.gender || null,
         season: row.season || null,
         cost_price: row.costPrice,
         sale_price: row.salePrice,
         wholesale_price: row.wholesalePrice,
-        tax_id: row.taxId,
+        tax_id: cloudRef(row.taxId, taxIds),
         reorder_level: row.reorderLevel,
         is_active: row.isActive,
         created_at: now,
         updated_at: row.updatedAt || now,
         deleted_at: null,
       })),
+      'sku',
     );
-    await upsertTable(
+    const variantIds = await upsertTable(
       'product_variants',
       shop.products
         .filter((row) => row.isActive && !isTombstoned('products', row.id))
@@ -697,7 +773,7 @@ export async function pushShopToCloud() {
         product.variants.map((row) => ({
           id: row.id,
           tenant_id: tenantId,
-          product_id: product.id,
+          product_id: cloudRef(product.id, productIds),
           sku: row.sku || product.sku,
           barcode: row.barcode || null,
           size: row.size || 'Default',
@@ -711,10 +787,11 @@ export async function pushShopToCloud() {
           deleted_at: null,
         })),
       ),
+      'sku',
     );
 
-    const accountIds = new Set(shop.accounts.map((row) => row.id));
-    await upsertTable(
+    const localAccountIds = new Set(shop.accounts.map((row) => row.id));
+    const voucherIdMap = await upsertTable(
       'vouchers',
       shop.vouchers.map((row) => ({
         id: row.id,
@@ -723,8 +800,8 @@ export async function pushShopToCloud() {
         voucher_type: row.voucherType,
         voucher_date: row.voucherDate,
         party_type: row.voucherType === 'receipt' || row.voucherType === 'sale' || row.voucherType === 'sale_return' ? 'customer' : row.partyId ? 'vendor' : null,
-        party_id: row.partyId,
-        account_id: row.accountId && accountIds.has(row.accountId) ? row.accountId : null,
+        party_id: cloudRef(row.partyId, customerIds, vendorIds),
+        account_id: row.accountId && localAccountIds.has(row.accountId) ? cloudRef(row.accountId, accountIds) : null,
         reference_no: row.referenceNo || null,
         notes: row.notes || null,
         subtotal: row.grandTotal,
@@ -739,17 +816,18 @@ export async function pushShopToCloud() {
         updated_at: now,
         deleted_at: null,
       })),
+      'voucher_no',
     );
     await upsertTable(
       'voucher_entries',
       shop.vouchers.flatMap((voucher) =>
         voucher.entries
-          .filter((entry) => accountIds.has(entry.accountId))
+          .filter((entry) => localAccountIds.has(entry.accountId))
           .map((entry, index) => ({
             id: entry.id || newId(),
             tenant_id: tenantId,
-            voucher_id: voucher.id,
-            account_id: entry.accountId,
+            voucher_id: cloudRef(voucher.id, voucherIdMap),
+            account_id: cloudRef(entry.accountId, accountIds),
             debit: entry.debit,
             credit: entry.credit,
             narration: entry.narration || null,
@@ -764,15 +842,15 @@ export async function pushShopToCloud() {
     const liveSales = shop.sales.filter(
       (row) => row.voucherId && !row.deletedAt && !isTombstoned('sales', row.id),
     );
-    await upsertTable(
+    const saleIds = await upsertTable(
       'sales',
       liveSales.map((row) => ({
         id: row.id,
         tenant_id: tenantId,
-        voucher_id: row.voucherId,
+        voucher_id: cloudRef(row.voucherId, voucherIdMap),
         invoice_no: row.invoiceNo,
         invoice_date: row.invoiceDate,
-        customer_id: row.customerId,
+        customer_id: cloudRef(row.customerId, customerIds),
         payment_mode: row.paymentMode,
         subtotal: row.subtotal,
         discount_amount: row.discountAmount,
@@ -787,6 +865,7 @@ export async function pushShopToCloud() {
         updated_at: now,
         deleted_at: row.deletedAt,
       })),
+      'invoice_no',
     );
     await upsertTable(
       'sale_items',
@@ -794,8 +873,8 @@ export async function pushShopToCloud() {
         sale.items.map((line, index) => ({
           id: line.id || newId(),
           tenant_id: tenantId,
-          sale_id: sale.id,
-          variant_id: line.variantId,
+          sale_id: cloudRef(sale.id, saleIds),
+          variant_id: cloudRef(line.variantId, variantIds),
           product_name: line.productName,
           size: line.size || '-',
           color: line.color || '-',
@@ -816,15 +895,15 @@ export async function pushShopToCloud() {
     const livePurchases = shop.purchases.filter(
       (row) => row.voucherId && !row.deletedAt && !isTombstoned('purchases', row.id),
     );
-    await upsertTable(
+    const purchaseIds = await upsertTable(
       'purchases',
       livePurchases.map((row) => ({
         id: row.id,
         tenant_id: tenantId,
-        voucher_id: row.voucherId,
+        voucher_id: cloudRef(row.voucherId, voucherIdMap),
         invoice_no: row.invoiceNo,
+        vendor_id: cloudRef(row.vendorId, vendorIds),
         invoice_date: row.invoiceDate,
-        vendor_id: row.vendorId,
         payment_mode: row.paymentMode,
         subtotal: row.subtotal,
         discount_amount: row.discountAmount,
@@ -839,6 +918,7 @@ export async function pushShopToCloud() {
         updated_at: now,
         deleted_at: row.deletedAt,
       })),
+      'invoice_no',
     );
     await upsertTable(
       'purchase_items',
@@ -846,8 +926,8 @@ export async function pushShopToCloud() {
         bill.items.map((line, index) => ({
           id: line.id || newId(),
           tenant_id: tenantId,
-          purchase_id: bill.id,
-          variant_id: line.variantId,
+          purchase_id: cloudRef(bill.id, purchaseIds),
+          variant_id: cloudRef(line.variantId, variantIds),
           product_name: line.productName,
           size: line.size || '-',
           color: line.color || '-',
@@ -865,15 +945,15 @@ export async function pushShopToCloud() {
     );
 
     const liveSaleReturns = shop.saleReturns.filter((row) => row.voucherId);
-    await upsertTable(
+    const saleReturnIds = await upsertTable(
       'sale_returns',
       liveSaleReturns.map((row) => ({
         id: row.id,
         tenant_id: tenantId,
-        voucher_id: row.voucherId,
+        voucher_id: cloudRef(row.voucherId, voucherIdMap),
         return_no: row.returnNo,
         return_date: row.returnDate,
-        sale_id: row.sourceId,
+        sale_id: cloudRef(row.sourceId, saleIds),
         customer_id: null,
         subtotal: row.grandTotal,
         tax_amount: 0,
@@ -884,6 +964,7 @@ export async function pushShopToCloud() {
         updated_at: now,
         deleted_at: null,
       })),
+      'return_no',
     );
     await upsertTable(
       'sale_return_items',
@@ -891,8 +972,8 @@ export async function pushShopToCloud() {
         doc.items.map((line) => ({
           id: line.id || newId(),
           tenant_id: tenantId,
-          sale_return_id: doc.id,
-          variant_id: line.variantId,
+          sale_return_id: cloudRef(doc.id, saleReturnIds),
+          variant_id: cloudRef(line.variantId, variantIds),
           quantity: line.quantity,
           unit_price: line.unitPrice,
           line_total: line.lineTotal,
@@ -903,15 +984,15 @@ export async function pushShopToCloud() {
       ),
     );
     const livePurchaseReturns = shop.purchaseReturns.filter((row) => row.voucherId);
-    await upsertTable(
+    const purchaseReturnIds = await upsertTable(
       'purchase_returns',
       livePurchaseReturns.map((row) => ({
         id: row.id,
         tenant_id: tenantId,
-        voucher_id: row.voucherId,
+        voucher_id: cloudRef(row.voucherId, voucherIdMap),
         return_no: row.returnNo,
         return_date: row.returnDate,
-        purchase_id: row.sourceId,
+        purchase_id: cloudRef(row.sourceId, purchaseIds),
         vendor_id: null,
         subtotal: row.grandTotal,
         tax_amount: 0,
@@ -922,6 +1003,7 @@ export async function pushShopToCloud() {
         updated_at: now,
         deleted_at: null,
       })),
+      'return_no',
     );
     await upsertTable(
       'purchase_return_items',
@@ -929,8 +1011,8 @@ export async function pushShopToCloud() {
         doc.items.map((line) => ({
           id: line.id || newId(),
           tenant_id: tenantId,
-          purchase_return_id: doc.id,
-          variant_id: line.variantId,
+          purchase_return_id: cloudRef(doc.id, purchaseReturnIds),
+          variant_id: cloudRef(line.variantId, variantIds),
           quantity: line.quantity,
           unit_cost: line.unitPrice,
           line_total: line.lineTotal,
@@ -941,8 +1023,9 @@ export async function pushShopToCloud() {
       ),
     );
 
+    const remoteCounterIds = await remoteRowIds('document_counters', 'doc_type');
     const counterRows = Object.entries(shop.counters).map(([docType, nextNumber]) => {
-      shop.counterIds[docType] = shop.counterIds[docType] || newId();
+      shop.counterIds[docType] = remoteCounterIds[docType] || shop.counterIds[docType] || newId();
       return {
         id: shop.counterIds[docType],
         tenant_id: tenantId,
@@ -955,7 +1038,7 @@ export async function pushShopToCloud() {
         deleted_at: null,
       };
     });
-    await upsertTable('document_counters', counterRows);
+    await saveRowsByNaturalKey('document_counters', 'doc_type', counterRows);
     await upsertTable(
       'audit_logs',
       shop.audit.slice(0, 80).map((row) => ({
@@ -975,7 +1058,7 @@ export async function pushShopToCloud() {
         sale.items.map((line) => ({
           id: `${sale.id}:${line.id}:sale`,
           tenant_id: tenantId,
-          variant_id: line.variantId,
+          variant_id: cloudRef(line.variantId, variantIds),
           movement_type: 'sale',
           quantity: line.quantity,
           reference_type: 'sale',
@@ -991,7 +1074,7 @@ export async function pushShopToCloud() {
         bill.items.map((line) => ({
           id: `${bill.id}:${line.id}:purchase`,
           tenant_id: tenantId,
-          variant_id: line.variantId,
+          variant_id: cloudRef(line.variantId, variantIds),
           movement_type: 'purchase',
           quantity: line.quantity,
           reference_type: 'purchase',
@@ -1063,8 +1146,8 @@ export async function hydrateCloudSync() {
   try {
     await hydrateTombstones();
     await pushTombstones();
-    if (cloudReady) await pushShopToCloud();
     await pullShopFromCloud();
+    await pushShopToCloud();
     lastAutoAt = Date.now();
     wasOnline = true;
   } catch (err) {
@@ -1079,8 +1162,8 @@ export async function syncShopNow() {
   try {
     await hydrateTombstones();
     await pushTombstones();
-    if (cloudReady) await pushShopToCloud();
     await pullShopFromCloud();
+    await pushShopToCloud();
   } catch (err) {
     const message = describeError(err);
     markRefreshError(message);

@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { AppActionSheet } from '@/components/AppActionSheet';
+import { LicenseGate } from '@/components/LicenseGate';
 import Colors from '@/constants/Colors';
 import { hydrateErp } from '@/lib/erp';
 import { hydrateRbac } from '@/lib/rbac';
@@ -45,6 +46,7 @@ export default function RootLayout() {
         hydrateErp(),
         hydrateSyncStatus(),
         import('@/lib/i18n').then((m) => m.hydrateLocale()),
+        import('@/lib/deviceLicense').then((m) => m.hydrateDeviceLicense()),
       ]);
       try {
         const { hydrateCloudAuth } = await import('@/lib/cloudAuth');
@@ -66,8 +68,10 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={agriLight}>
         <StatusBar style="dark" />
+        <LicenseGate />
         <Stack>
           <Stack.Screen name="login" options={{ headerShown: false }} />
+          <Stack.Screen name="activate" options={{ headerShown: false }} />
           <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
           <Stack.Screen name="customer/[id]" options={{ title: 'Customer', headerBackTitle: 'Back' }} />
           <Stack.Screen name="customer/new" options={{ title: 'New customer', headerBackTitle: 'Back' }} />

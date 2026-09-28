@@ -8,6 +8,8 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { font, radius, tokens, typeScale } from '@/constants/theme';
 import { createShopAccount, signInShopAccount } from '@/lib/cloudAuth';
+import { shopLicenseAllowed } from '@/lib/deviceLicense';
+import { isVendorUnlocked } from '@/lib/vendorUnlock';
 import { getSession, signInWithPassword } from '@/lib/rbac';
 import { getLocale, setLocale, subscribeLocale, t } from '@/lib/i18n';
 
@@ -23,6 +25,10 @@ export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [, tick] = useState(0);
   useEffect(() => subscribeLocale(() => tick((n) => n + 1)), []);
+
+  if (!isVendorUnlocked() && !shopLicenseAllowed()) {
+    return <Redirect href="/activate" />;
+  }
 
   if (getSession()) {
     return <Redirect href="/" />;
@@ -50,6 +56,7 @@ export default function LoginScreen() {
         return;
       }
       if (mode === 'create') {
+        if (!shopCode.trim()) throw new Error('Enter the shop code.');
         await createShopAccount({ email: identifier, password, shopCode });
       } else {
         await signInShopAccount({ email: identifier, password, shopCode });

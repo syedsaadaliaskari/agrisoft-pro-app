@@ -3,9 +3,9 @@
     "name": "Agri Soft Pro",
     "slug": "agrisoft-pro",
     "owner": "syedsaadaliaskari",
-    "version": "1.1.1",
+    "version": "1.0.2",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/brand-logo.png",
     "scheme": "agrisoftpro",
     "userInterfaceStyle": "light",
     "ios": {
@@ -13,12 +13,10 @@
     },
     "android": {
       "package": "com.agrisoft.pro.app",
-      "versionCode": 3,
+      "versionCode": 5,
       "adaptiveIcon": {
         "backgroundColor": "#f3f5f8",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/brand-logo.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -30,14 +28,14 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/brand-logo.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/brand-logo.png",
           "resizeMode": "contain",
           "backgroundColor": "#f3f5f8"
         }
