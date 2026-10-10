@@ -5,6 +5,7 @@ import { newId } from '@/lib/id';
 import {
   ACCOUNTANT_CODES,
   CASHIER_CODES,
+  hasPermission,
   isShopPermission,
   isSuperAdminUser,
   PERMISSION_CATALOG,
@@ -26,6 +27,10 @@ export type UserRow = {
   fullName: string;
   roleId: string;
   isActive: boolean;
+  email?: string | null;
+  updatedAt?: string;
+  fromCloud?: boolean;
+  passwordPending?: boolean;
 };
 
 type Store = {
@@ -416,6 +421,189 @@ export async function changePassword(currentPassword: string, nextPassword: stri
   const ok = await bcrypt.compare(currentPassword, user.passwordHash);
   if (!ok) throw new Error('Current password is wrong.');
   user.passwordHash = await bcrypt.hash(nextPassword, 10);
+  user.updatedAt = new Date().toISOString();
+  if (user.fromCloud) user.passwordPending = true;
   await persist();
   emit();
+}
+
+function roleNameOf(user: UserRow) {
+  return store.roles.find((role) => role.id === user.roleId)?.name ?? '';
+}
+
+async function replacePassword(user: UserRow, nextPassword: string) {
+  user.passwordHash = await bcrypt.hash(nextPassword, 10);
+  user.updatedAt = new Date().toISOString();
+  if (user.fromCloud) user.passwordPending = true;
+  await persist();
+  emit();
+}
+
+/** Logged-out reset for one typed username. Does not return the old password. */
+export async function resetForgottenPassword(input: {
+  username: string;
+  email?: string | null;
+  newPassword: string;
+}): Promise<void> {
+  const username = input.username.trim().toLowerCase();
+  const email = input.email?.trim().toLowerCase() || '';
+  const newPassword = input.newPassword ?? '';
+  if (!username) throw new Error('Enter the username');
+  if (newPassword.length < 4) throw new Error('New password must be at least 4 characters');
+
+  const user = store.users.find((row) => row.username === username && row.isActive);
+  if (!user) throw new Error('No active account with that username');
+
+  const roleName = roleNameOf(user);
+  if (roleName === 'Super Admin') {
+    throw new Error('This account cannot be reset from the login screen');
+  }
+
+  const savedEmail = user.email?.trim().toLowerCase() || '';
+  if (roleName === 'Admin') {
+    if (!savedEmail) {
+      throw new Error(
+        'This admin account has no email saved. A signed-in admin must add that email in Users before forgot password can be used.',
+      );
+    }
+    if (email !== savedEmail) throw new Error('Email does not match this admin account');
+  } else if (savedEmail && email !== savedEmail) {
+    throw new Error('Email does not match this account');
+  }
+
+  await replacePassword(user, newPassword);
+}
+
+/** Signed-in admin sets one shop user's password. Cashier and accountant cannot call this. */
+export async function setShopUserPassword(userId: string, newPassword: string): Promise<void> {
+  if (!hasPermission(session, 'users.manage')) throw new Error('You cannot change that password.');
+  if (newPassword.length < 4) throw new Error('New password must be at least 4 characters');
+  const user = store.users.find((row) => row.id === userId);
+  if (!user) throw new Error('User not found.');
+  if (roleNameOf(user) === 'Super Admin') {
+    throw new Error('This account cannot be reset from the login screen');
+  }
+  await replacePassword(user, newPassword);
+}
+
+export type CloudShopUser = {
+  id: string;
+  username: string;
+  password_hash: string;
+  full_name: string;
+  email: string | null;
+  role_id: string;
+  is_active: boolean;
+  updated_at: string;
+};
+
+function codesForRoleName(name: string): string[] {
+  if (name === 'Cashier') return [...CASHIER_CODES];
+  if (name === 'Accountant') return [...ACCOUNTANT_CODES];
+  if (name === 'Super Admin') return allCodes();
+  return shopAdminCodes();
+}
+
+function cloudIsOlder(localIso: string | undefined, cloudIso: string | undefined) {
+  if (!localIso) return false;
+  const local = Date.parse(localIso);
+  const cloud = cloudIso ? Date.parse(cloudIso) : 0;
+  if (Number.isNaN(local)) return false;
+  if (Number.isNaN(cloud)) return true;
+  return local >= cloud;
+}
+
+/** Pull shop users into this phone. A newer local password reset is kept. */
+export async function mergeCloudShopUsers(input: {
+  roles: { id: string; name: string }[];
+  users: CloudShopUser[];
+}): Promise<void> {
+  for (const role of input.roles) {
+    const name = role.name?.trim() || '';
+    if (!name || name.toLowerCase() === 'super admin') continue;
+    const sameName = store.roles.find((row) => row.name === name);
+    if (sameName && sameName.id !== role.id) {
+      for (const user of store.users) {
+        if (user.roleId === sameName.id) user.roleId = role.id;
+      }
+      if (session?.roleId === sameName.id) session = { ...session, roleId: role.id };
+      sameName.id = role.id;
+    } else if (!store.roles.some((row) => row.id === role.id)) {
+      store.roles.push({
+        id: role.id,
+        name,
+        description: '',
+        isSystem: true,
+        permissionCodes: codesForRoleName(name),
+      });
+    }
+  }
+
+  for (const row of input.users) {
+    const role = store.roles.find((item) => item.id === row.role_id);
+    if (role?.name === 'Super Admin') continue;
+    const username = row.username.trim().toLowerCase();
+    if (!username || !row.password_hash) continue;
+    let local = store.users.find((user) => user.id === row.id) ?? store.users.find((user) => user.username === username);
+    if (!local) {
+      store.users.push({
+        id: row.id,
+        username,
+        passwordHash: row.password_hash,
+        fullName: row.full_name?.trim() || username,
+        roleId: row.role_id,
+        isActive: Boolean(row.is_active),
+        email: row.email,
+        updatedAt: row.updated_at,
+        fromCloud: true,
+        passwordPending: false,
+      });
+      continue;
+    }
+    if (local.id !== row.id) {
+      if (session?.id === local.id) session = session ? { ...session, id: row.id } : session;
+      local.id = row.id;
+    }
+    const keepPassword = Boolean(local.passwordPending) && cloudIsOlder(local.updatedAt, row.updated_at);
+    local.username = username;
+    local.fullName = row.full_name?.trim() || local.fullName;
+    local.email = row.email;
+    local.roleId = row.role_id;
+    local.isActive = Boolean(row.is_active);
+    local.fromCloud = true;
+    if (!keepPassword) {
+      local.passwordHash = row.password_hash;
+      local.updatedAt = row.updated_at;
+      local.passwordPending = false;
+    }
+  }
+
+  if (session && !session.id.startsWith('cloud:')) {
+    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  }
+  await persist();
+  emit();
+}
+
+export function listPasswordPushes(): { id: string; passwordHash: string; updatedAt: string }[] {
+  return store.users
+    .filter((user) => user.fromCloud && user.passwordPending && user.passwordHash && user.updatedAt)
+    .filter((user) => roleNameOf(user) !== 'Super Admin')
+    .map((user) => ({
+      id: user.id,
+      passwordHash: user.passwordHash,
+      updatedAt: user.updatedAt as string,
+    }));
+}
+
+export async function markPasswordsPushed(ids: string[]): Promise<void> {
+  const done = new Set(ids);
+  let changed = false;
+  for (const user of store.users) {
+    if (done.has(user.id) && user.passwordPending) {
+      user.passwordPending = false;
+      changed = true;
+    }
+  }
+  if (changed) await persist();
 }

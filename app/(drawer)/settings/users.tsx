@@ -15,6 +15,7 @@ import {
   listUsers,
   rolesForEditor,
   setRolePermissions,
+  setShopUserPassword,
   setUserActive,
   subscribeSession,
 } from '@/lib/rbac';
@@ -39,6 +40,9 @@ export default function UsersScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [roleId, setRoleId] = useState(roles.find((role) => role.name === 'Admin')?.id ?? roles[0]?.id ?? '');
+  const [resetId, setResetId] = useState<string | null>(null);
+  const [nextPassword, setNextPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   return (
     <ScreenGate permission="users.manage">
@@ -102,16 +106,69 @@ export default function UsersScreen() {
         <View style={[styles.card, cardShadow, { backgroundColor: colors.card }]}>
           <Text style={[styles.heading, { color: colors.text }]}>Users</Text>
           {users.map((user) => (
-            <View key={user.id} style={[styles.userRow, { borderBottomColor: colors.border }]}>
+            <View key={user.id}>
+            <View style={[styles.userRow, { borderBottomColor: colors.border }]}>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.name, { color: colors.text }]}>{user.fullName}</Text>
                 <Text style={[styles.meta, { color: colors.muted }]}>
-                  {user.username} · {allRoles.find((role) => role.id === user.roleId)?.name} · {user.isActive ? 'Active' : 'Inactive'}
+                  {user.username}
+                  {user.email ? ` · ${user.email}` : ''} · {allRoles.find((role) => role.id === user.roleId)?.name} · {user.isActive ? 'Active' : 'Inactive'}
                 </Text>
               </View>
+              <Pressable
+                onPress={() => {
+                  setResetId(resetId === user.id ? null : user.id);
+                  setNextPassword('');
+                  setConfirmPassword('');
+                }}>
+                <Text style={{ color: colors.tint, fontWeight: '700' }}>Set password</Text>
+              </Pressable>
               <Pressable onPress={() => void setUserActive(user.id, !user.isActive)}>
                 <Text style={{ color: colors.tint, fontWeight: '700' }}>{user.isActive ? 'Disable' : 'Enable'}</Text>
               </Pressable>
+            </View>
+            {resetId === user.id ? (
+              <View style={styles.reset}>
+                <TextInput
+                  value={nextPassword}
+                  onChangeText={setNextPassword}
+                  secureTextEntry
+                  placeholder="New password"
+                  placeholderTextColor={colors.muted}
+                  style={[styles.input, { color: colors.text, borderColor: colors.border }]}
+                />
+                <TextInput
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry
+                  placeholder="Confirm password"
+                  placeholderTextColor={colors.muted}
+                  style={[styles.input, { color: colors.text, borderColor: colors.border }]}
+                />
+                <PrimaryButton
+                  label="Save password"
+                  color={colors.tint}
+                  onPress={async () => {
+                    try {
+                      if (nextPassword !== confirmPassword) throw new Error('The two passwords do not match');
+                      await setShopUserPassword(user.id, nextPassword);
+                      try {
+                        const { syncShopUsers } = await import('@/lib/userSync');
+                        await syncShopUsers();
+                      } catch {
+                        /* the new password stays on this phone until the next sync */
+                      }
+                      setResetId(null);
+                      setNextPassword('');
+                      setConfirmPassword('');
+                      Alert.alert('Password updated');
+                    } catch (err) {
+                      Alert.alert(err instanceof Error ? err.message : "Couldn't save.");
+                    }
+                  }}
+                />
+              </View>
+            ) : null}
             </View>
           ))}
         </View>
@@ -162,6 +219,7 @@ const styles = StyleSheet.create({
   roles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1 },
   userRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  reset: { gap: 8, paddingBottom: 12 },
   name: { fontSize: 16, fontWeight: '700' },
   meta: { fontSize: 13, marginTop: 2 },
   permRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },

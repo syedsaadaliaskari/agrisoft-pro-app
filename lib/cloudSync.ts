@@ -1093,8 +1093,18 @@ export async function pushShopToCloud() {
       productCount: shop.products.length,
       saleCount: shop.sales.length,
     });
+    await syncShopUsersQuietly();
   } finally {
     pushing = false;
+  }
+}
+
+async function syncShopUsersQuietly() {
+  try {
+    const { syncShopUsers } = await import('@/lib/userSync');
+    await syncShopUsers();
+  } catch {
+    /* a password sync must not stop customers, products, or sales */
   }
 }
 
@@ -1148,6 +1158,7 @@ export async function hydrateCloudSync() {
     await pushTombstones();
     await pullShopFromCloud();
     await pushShopToCloud();
+    await syncShopUsersQuietly();
     lastAutoAt = Date.now();
     wasOnline = true;
   } catch (err) {
@@ -1164,6 +1175,7 @@ export async function syncShopNow() {
     await pushTombstones();
     await pullShopFromCloud();
     await pushShopToCloud();
+    await syncShopUsersQuietly();
   } catch (err) {
     const message = describeError(err);
     markRefreshError(message);
