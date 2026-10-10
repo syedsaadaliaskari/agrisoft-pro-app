@@ -7,7 +7,7 @@ import { AppLogo } from '@/components/AppLogo';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { font, radius, tokens, typeScale } from '@/constants/theme';
-import { createShopAccount, signInShopAccount } from '@/lib/cloudAuth';
+import { createShopAccount, signInShopAccount, startOwnShop } from '@/lib/cloudAuth';
 import { shopLicenseAllowed } from '@/lib/deviceLicense';
 import { isVendorUnlocked } from '@/lib/vendorUnlock';
 import { getSession, signInWithPassword } from '@/lib/rbac';
@@ -17,10 +17,11 @@ export default function LoginScreen() {
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
   const router = useRouter();
-  const [mode, setMode] = useState<'signin' | 'create'>('signin');
+  const [mode, setMode] = useState<'signin' | 'create' | 'start'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [shopCode, setShopCode] = useState('');
+  const [shopName, setShopName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [, tick] = useState(0);
@@ -55,7 +56,9 @@ export default function LoginScreen() {
         router.replace('/');
         return;
       }
-      if (mode === 'create') {
+      if (mode === 'start') {
+        await startOwnShop({ email: identifier, password, shopName });
+      } else if (mode === 'create') {
         if (!shopCode.trim()) throw new Error('Enter the shop code.');
         await createShopAccount({ email: identifier, password, shopCode });
       } else {
@@ -74,13 +77,24 @@ export default function LoginScreen() {
       <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
         <AppLogo size={220} variant="lockup" />
         <Text style={[styles.sub, { color: colors.muted }]}>
-          {mode === 'create' ? t('login.create') : t('login.signIn')}
+          {mode === 'start' ? t('login.startShop') : mode === 'create' ? t('login.create') : t('login.signIn')}
         </Text>
-        <Pressable onPress={() => setMode(mode === 'create' ? 'signin' : 'create')}>
-          <Text style={[styles.switch, { color: colors.tint }]}>
-            {mode === 'create' ? t('login.haveAccount') : t('login.newPhone')}
-          </Text>
-        </Pressable>
+        {mode === 'signin' ? (
+          <>
+            <Pressable onPress={() => setMode('create')}>
+              <Text style={[styles.switch, { color: colors.tint }]}>{t('login.newPhone')}</Text>
+            </Pressable>
+            <Pressable onPress={() => setMode('start')}>
+              <Text style={[styles.switch, { color: colors.tint }]}>{t('login.noComputer')}</Text>
+            </Pressable>
+          </>
+        ) : (
+          <Pressable onPress={() => setMode('signin')}>
+            <Text style={[styles.switch, { color: colors.tint }]}>
+              {mode === 'start' ? t('login.haveCode') : t('login.haveAccount')}
+            </Text>
+          </Pressable>
+        )}
         <Pressable onPress={() => void setLocale(getLocale() === 'ur' ? 'en' : 'ur')}>
           <Text style={[styles.switch, { color: colors.muted }]}>
             {t('lang.switch')}: {getLocale() === 'ur' ? t('lang.english') : t('lang.urdu')}
@@ -104,21 +118,31 @@ export default function LoginScreen() {
           placeholderTextColor={colors.muted}
           style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
         />
-        <TextInput
-          value={shopCode}
-          onChangeText={setShopCode}
-          autoCapitalize="none"
-          placeholder={t('login.shopCode')}
-          placeholderTextColor={colors.muted}
-          style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
-        />
+        {mode === 'start' ? (
+          <TextInput
+            value={shopName}
+            onChangeText={setShopName}
+            placeholder={t('login.shopName')}
+            placeholderTextColor={colors.muted}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+          />
+        ) : (
+          <TextInput
+            value={shopCode}
+            onChangeText={setShopCode}
+            autoCapitalize="none"
+            placeholder={t('login.shopCode')}
+            placeholderTextColor={colors.muted}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+          />
+        )}
         {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
         <Pressable
           onPress={() => void submit()}
           disabled={busy}
           style={[styles.button, { backgroundColor: colors.tint, opacity: busy ? 0.5 : 1 }]}>
           <Text style={styles.buttonText}>
-            {busy ? t('login.wait') : mode === 'create' ? t('login.create') : t('login.signIn')}
+            {busy ? t('login.wait') : mode === 'start' ? t('login.start') : mode === 'create' ? t('login.create') : t('login.signIn')}
           </Text>
         </Pressable>
       </ScrollView>

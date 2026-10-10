@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { readActivationPayload, todayIsoDate, type LicensePlan } from '@/lib/activation';
+import { getMemberTenantId } from '@/lib/config';
+import { getSupabase } from '@/lib/supabase';
 import { isVendorUnlocked } from '@/lib/vendorUnlock';
 
 const INSTALL_KEY = 'agrisoft.license.installId';
@@ -65,9 +67,16 @@ function daysBetween(fromIso: string, toIso: string) {
 
 function makeInstallId() {
   const part = () => {
-    const bytes = new Uint8Array(2);
-    globalThis.crypto.getRandomValues(bytes);
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
+    const cryptoApi = globalThis.crypto;
+    if (cryptoApi?.getRandomValues) {
+      const bytes = new Uint8Array(2);
+      cryptoApi.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
+    }
+    return Math.floor(Math.random() * 0x10000)
+      .toString(16)
+      .padStart(4, '0')
+      .toUpperCase();
   };
   return `ASP-${part()}-${part()}-${part()}`;
 }
@@ -162,6 +171,66 @@ export async function applyDeviceActivation(rawCode: string) {
   };
   await AsyncStorage.setItem(RECORD_KEY, JSON.stringify(row));
   current = statusFrom(identity, row);
+  emit();
+  await syncShopLicense();
+  return current;
+}
+
+type ShopLicenseRow = {
+  install_id?: string | null;
+  trial_started_at?: string | null;
+  plan?: string | null;
+  license_expires_at?: string | null;
+  license_name?: string | null;
+};
+
+/** Pull the shop Install ID and activation. Sales sync is not part of this. */
+export async function syncShopLicense() {
+  if (isVendorUnlocked()) return current;
+  const tenantId = getMemberTenantId();
+  if (!tenantId) return current;
+  const client = getSupabase();
+  if (!client) return current;
+  const identity = await ensureIdentity();
+  const raw = await AsyncStorage.getItem(RECORD_KEY);
+  let saved: StoredLicense | null = null;
+  if (raw) {
+    try {
+      saved = JSON.parse(raw) as StoredLicense;
+    } catch {
+      saved = null;
+    }
+  }
+  const { data, error } = await client.rpc('sync_shop_license', {
+    p_tenant_id: tenantId,
+    p_install_id: identity.installId,
+    p_trial_started_at: identity.installedAt,
+    p_plan: saved?.plan ?? null,
+    p_expires_at: saved?.expiresAt ?? null,
+    p_license_name: saved?.name ?? null,
+    p_source: 'phone',
+  });
+  if (error || !data || typeof data !== 'object') return current;
+  const shop = data as ShopLicenseRow;
+  const installId = shop.install_id?.trim();
+  const installedAt = shop.trial_started_at?.trim();
+  if (!installId || !installedAt) return current;
+  await AsyncStorage.setItem(INSTALL_KEY, installId);
+  await AsyncStorage.setItem(INSTALLED_AT_KEY, installedAt);
+  const plan = shop.plan?.trim();
+  if (plan === 'monthly' || plan === 'yearly' || plan === 'forever') {
+    const row: StoredLicense = {
+      name: shop.license_name?.trim() || 'Activated',
+      plan,
+      activatedAt: installedAt,
+      expiresAt: plan === 'forever' ? null : shop.license_expires_at?.trim() || null,
+    };
+    await AsyncStorage.setItem(RECORD_KEY, JSON.stringify(row));
+    current = statusFrom({ installId, installedAt }, row);
+  } else {
+    await AsyncStorage.removeItem(RECORD_KEY);
+    current = statusFrom({ installId, installedAt }, null);
+  }
   emit();
   return current;
 }

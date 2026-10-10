@@ -39,15 +39,22 @@ export default function RootLayout() {
 
   useEffect(() => {
     void (async () => {
-      await import('@/lib/vendorUnlock').then((m) => m.hydrateVendorUnlock());
-      await Promise.all([
-        hydrateRbac(),
-        hydrateVendor(),
-        hydrateErp(),
-        hydrateSyncStatus(),
-        import('@/lib/i18n').then((m) => m.hydrateLocale()),
-        import('@/lib/deviceLicense').then((m) => m.hydrateDeviceLicense()),
-      ]);
+      try {
+        await import('@/lib/vendorUnlock').then((m) => m.hydrateVendorUnlock());
+        await Promise.all([
+          hydrateRbac(),
+          hydrateVendor(),
+          hydrateErp(),
+          hydrateSyncStatus(),
+          import('@/lib/i18n').then((m) => m.hydrateLocale()),
+          import('@/lib/deviceLicense').then((m) => m.hydrateDeviceLicense()),
+        ]);
+      } catch {
+        /* a local startup error must not keep the logo on screen */
+      } finally {
+        setReady(true);
+        void SplashScreen.hideAsync();
+      }
       try {
         const { hydrateCloudAuth } = await import('@/lib/cloudAuth');
         await hydrateCloudAuth();
@@ -57,8 +64,6 @@ export default function RootLayout() {
       } catch {
         /* offline is fine */
       }
-      setReady(true);
-      SplashScreen.hideAsync();
     })();
   }, []);
 

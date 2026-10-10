@@ -7,6 +7,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { ScreenGate } from '@/components/ScreenGate';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { getStoredJoinCode } from '@/lib/cloudAuth';
 import { getSettings, saveSettings, subscribeErp } from '@/lib/erp';
 import { syncShopNow } from '@/lib/cloudSync';
 import { formatWhen } from '@/lib/format';
@@ -46,7 +47,11 @@ export default function SettingsScreen() {
   const [vendorCode, setVendorCode] = useState('');
   const [vendorBusy, setVendorBusy] = useState(false);
   const [vendorError, setVendorError] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState('');
   const sync = getSyncStatus();
+  useEffect(() => {
+    void getStoredJoinCode().then(setJoinCode);
+  }, []);
 
   return (
     <ScreenGate permission="settings.manage">
@@ -60,6 +65,7 @@ export default function SettingsScreen() {
         ) : (
           <>
           <Card title={t('settings.shop')}>
+            {joinCode ? <Text style={{ color: colors.text, fontWeight: '700' }}>Shop code {joinCode}</Text> : null}
             <Field label="Shop name" value={shop_name} onChangeText={setName} />
             <Field label="Phone" value={shop_phone} onChangeText={setPhone} keyboardType="phone-pad" />
             <Field label="Address" value={shop_address} onChangeText={setAddress} />

@@ -1,10 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { setMemberTenantId } from '@/lib/config';
+import { syncShopLicense } from '@/lib/deviceLicense';
 import { startCloudShopSession } from '@/lib/rbac';
 import { getSupabase } from '@/lib/supabase';
 
 const TENANT_KEY = 'agrisoft.cloud.memberTenant';
+const JOIN_CODE_KEY = 'agrisoft.cloud.joinCode';
 
 function requireClient() {
   const client = getSupabase();
@@ -54,6 +56,7 @@ export async function joinShop(shopCode: string) {
     await clearTombstones();
   }
   await rememberTenant(tenantId);
+  await syncShopLicense();
   return tenantId;
 }
 
@@ -70,7 +73,10 @@ export async function loadMembership(): Promise<string> {
     .limit(1);
   if (error) throw new Error(describeAuthError(error, "Couldn't load your shop."));
   const tenantId = data?.[0]?.tenant_id ? String(data[0].tenant_id) : '';
-  if (tenantId) await rememberTenant(tenantId);
+  if (tenantId) {
+    await rememberTenant(tenantId);
+    await syncShopLicense();
+  }
   return tenantId;
 }
 
@@ -89,7 +95,76 @@ export async function hydrateCloudAuth() {
   const tenantId = (await loadMembership()) || stored;
   if (tenantId && data.session.user.email) {
     await startCloudShopSession(data.session.user.email);
+    await syncShopLicense();
   }
+}
+
+export async function getStoredJoinCode() {
+  const raw = (await AsyncStorage.getItem(JOIN_CODE_KEY))?.trim() || '';
+  const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 8) return '';
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+/** Start an empty shop on this phone. Does not join or change an existing shop. */
+export async function startOwnShop(input: { email: string; password: string; shopName: string }) {
+  const email = input.email.trim().toLowerCase();
+  const password = input.password;
+  const shopName = input.shopName.trim();
+  if (!email.includes('@')) throw new Error('Enter a valid email.');
+  if (password.length < 6) throw new Error('Password must be at least 6 characters.');
+  if (!shopName) throw new Error('Enter the shop name.');
+
+  const { localShopHasWork } = await import('@/lib/erp');
+  if (localShopHasWork()) {
+    throw new Error('This phone already has shop data. Sign in to keep it.');
+  }
+
+  const client = requireClient();
+  const signedUp = await client.auth.signUp({ email, password });
+  let session = signedUp.data?.session ?? null;
+  if (signedUp.error && /already registered/i.test(signedUp.error.message || '')) {
+    const signedIn = await client.auth.signInWithPassword({ email, password });
+    if (signedIn.error) throw new Error(describeAuthError(signedIn.error, "Couldn't sign in."));
+    session = signedIn.data.session;
+  } else if (signedUp.error) {
+    throw new Error(describeAuthError(signedUp.error, "Couldn't create the account."));
+  } else {
+    session = signedUp.data?.session ?? null;
+  }
+  if (!session) {
+    throw new Error('Account created. Confirm your email if asked, then sign in.');
+  }
+
+  const created = await client.rpc('create_shop', { shop_name: shopName });
+  if (created.error) {
+    const message = created.error.message || '';
+    if (/already belongs/i.test(message)) {
+      throw new Error('This account already has a shop. Sign in and leave the shop code empty.');
+    }
+    if (/create_shop|schema cache|function/i.test(message)) {
+      throw new Error("Couldn't start a new shop yet.");
+    }
+    throw new Error(describeAuthError(created.error, "Couldn't start the shop."));
+  }
+
+  const payload = created.data as { tenant_id?: string; join_code?: string } | null;
+  const tenantId = payload?.tenant_id?.trim() || '';
+  const joinCode = payload?.join_code?.trim() || '';
+  if (!tenantId || !joinCode) throw new Error("Couldn't start the shop.");
+
+  const { resetLocalShopBooks, saveSettings } = await import('@/lib/erp');
+  const { resetCloudPullState } = await import('@/lib/cloudSync');
+  const { clearTombstones } = await import('@/lib/tombstones');
+  await resetLocalShopBooks();
+  await resetCloudPullState();
+  await clearTombstones();
+  await saveSettings({ shop_name: shopName });
+  await rememberTenant(tenantId);
+  await AsyncStorage.setItem(JOIN_CODE_KEY, joinCode.toUpperCase());
+  await syncShopLicense();
+  await startCloudShopSession(email);
+  return { tenantId, joinCode };
 }
 
 export async function createShopAccount(input: { email: string; password: string; shopCode: string }) {
