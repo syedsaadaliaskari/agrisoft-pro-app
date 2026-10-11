@@ -8,7 +8,7 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { font, radius, tokens, typeScale } from '@/constants/theme';
 import { createShopAccount, signInShopAccount, startOwnShop } from '@/lib/cloudAuth';
-import { shopLicenseAllowed } from '@/lib/deviceLicense';
+import { isShopLicenseClosed, shopLicenseAllowed, subscribeDeviceLicense } from '@/lib/deviceLicense';
 import { isVendorUnlocked } from '@/lib/vendorUnlock';
 import { getSession, resetForgottenPassword, signInWithPassword } from '@/lib/rbac';
 import { getLocale, setLocale, subscribeLocale, t } from '@/lib/i18n';
@@ -31,13 +31,20 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [, tick] = useState(0);
-  useEffect(() => subscribeLocale(() => tick((n) => n + 1)), []);
+  useEffect(() => {
+    const stopLocale = subscribeLocale(() => tick((n) => n + 1));
+    const stopLicense = subscribeDeviceLicense(() => tick((n) => n + 1));
+    return () => {
+      stopLocale();
+      stopLicense();
+    };
+  }, []);
 
-  if (!isVendorUnlocked() && !shopLicenseAllowed()) {
+  if (!isVendorUnlocked() && isShopLicenseClosed()) {
     return <Redirect href="/activate" />;
   }
 
-  if (getSession()) {
+  if (getSession() && (isVendorUnlocked() || shopLicenseAllowed())) {
     return <Redirect href="/" />;
   }
 

@@ -3,7 +3,7 @@
     "name": "Agri Soft Pro",
     "slug": "agrisoft-pro",
     "owner": "syedsaadaliaskari",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/brand-logo.png",
     "scheme": "agrisoftpro",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.agrisoft.pro.app",
-      "versionCode": 8,
+      "versionCode": 9,
       "adaptiveIcon": {
         "backgroundColor": "#f3f5f8",
         "foregroundImage": "./assets/images/brand-logo.png"

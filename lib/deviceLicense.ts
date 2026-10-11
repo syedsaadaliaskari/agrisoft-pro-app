@@ -30,6 +30,7 @@ export type DeviceLicenseStatus = {
 };
 
 let current: DeviceLicenseStatus | null = null;
+let shopLicenseClosed = false;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -51,6 +52,12 @@ export function getDeviceLicense() {
 export function shopLicenseAllowed() {
   if (isVendorUnlocked()) return true;
   return current?.allowed === true;
+}
+
+/** True only after the shop row says this phone is locked. Until then, show login. */
+export function isShopLicenseClosed() {
+  if (isVendorUnlocked()) return false;
+  return shopLicenseClosed && !shopLicenseAllowed();
 }
 
 function addDaysIso(isoDate: string, days: number) {
@@ -171,6 +178,7 @@ export async function applyDeviceActivation(rawCode: string) {
   };
   await AsyncStorage.setItem(RECORD_KEY, JSON.stringify(row));
   current = statusFrom(identity, row);
+  shopLicenseClosed = false;
   emit();
   await syncShopLicense();
   return current;
@@ -210,11 +218,23 @@ export async function syncShopLicense() {
     p_license_name: saved?.name ?? null,
     p_source: 'phone',
   });
-  if (error || !data || typeof data !== 'object') return current;
+  if (error || !data || typeof data !== 'object') {
+    if (!shopLicenseAllowed()) {
+      shopLicenseClosed = true;
+      emit();
+    }
+    return current;
+  }
   const shop = data as ShopLicenseRow;
   const installId = shop.install_id?.trim();
   const installedAt = shop.trial_started_at?.trim();
-  if (!installId || !installedAt) return current;
+  if (!installId || !installedAt) {
+    if (!shopLicenseAllowed()) {
+      shopLicenseClosed = true;
+      emit();
+    }
+    return current;
+  }
   await AsyncStorage.setItem(INSTALL_KEY, installId);
   await AsyncStorage.setItem(INSTALLED_AT_KEY, installedAt);
   const plan = shop.plan?.trim();
@@ -231,6 +251,7 @@ export async function syncShopLicense() {
     await AsyncStorage.removeItem(RECORD_KEY);
     current = statusFrom({ installId, installedAt }, null);
   }
+  shopLicenseClosed = current.allowed !== true;
   emit();
   return current;
 }

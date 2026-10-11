@@ -12,6 +12,7 @@ import {
   applyDeviceActivation,
   getDeviceLicense,
   subscribeDeviceLicense,
+  syncShopLicense,
   whatsappActivationUrl,
 } from '@/lib/deviceLicense';
 import { getLocale, setLocale, subscribeLocale, t } from '@/lib/i18n';
@@ -33,6 +34,7 @@ export default function ActivateScreen() {
     });
     const stopLocale = subscribeLocale(() => setTick((n) => n + 1));
     setInstallId(getDeviceLicense()?.installId ?? '');
+    void syncShopLicense();
     return () => {
       stopLicense();
       stopLocale();

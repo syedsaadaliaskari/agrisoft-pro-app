@@ -5,7 +5,7 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { font, typeScale } from '@/constants/theme';
 import { subscribeLocale, tNav } from '@/lib/i18n';
-import { shopLicenseAllowed } from '@/lib/deviceLicense';
+import { isShopLicenseClosed, shopLicenseAllowed, subscribeDeviceLicense } from '@/lib/deviceLicense';
 import { getSession, subscribeSession } from '@/lib/rbac';
 import { isVendorUnlocked } from '@/lib/vendorUnlock';
 
@@ -16,13 +16,15 @@ export default function AppLayout() {
   useEffect(() => {
     const a = subscribeSession(() => setTick((n) => n + 1));
     const b = subscribeLocale(() => setTick((n) => n + 1));
+    const c = subscribeDeviceLicense(() => setTick((n) => n + 1));
     return () => {
       a();
       b();
+      c();
     };
   }, []);
   if (!isVendorUnlocked() && !shopLicenseAllowed()) {
-    return <Redirect href="/activate" />;
+    return <Redirect href={isShopLicenseClosed() ? '/activate' : '/login'} />;
   }
   if (!getSession()) {
     return <Redirect href="/login" />;
