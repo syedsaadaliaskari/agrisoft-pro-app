@@ -55,15 +55,17 @@ export default function RootLayout() {
         setReady(true);
         void SplashScreen.hideAsync();
       }
-      try {
-        const { hydrateCloudAuth } = await import('@/lib/cloudAuth');
-        await hydrateCloudAuth();
-        const { hydrateCloudSync, startCloudSyncScheduler } = await import('@/lib/cloudSync');
-        await hydrateCloudSync();
-        startCloudSyncScheduler();
-      } catch {
-        /* offline is fine */
-      }
+      void (async () => {
+        try {
+          const { hydrateCloudAuth } = await import('@/lib/cloudAuth');
+          await hydrateCloudAuth();
+          const { hydrateCloudSync, startCloudSyncScheduler } = await import('@/lib/cloudSync');
+          startCloudSyncScheduler();
+          await hydrateCloudSync();
+        } catch {
+          /* offline is fine */
+        }
+      })();
     })();
   }, []);
 

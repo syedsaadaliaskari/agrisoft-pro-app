@@ -48,15 +48,17 @@ export default function LoginScreen() {
     return <Redirect href="/" />;
   }
 
-  const afterCloud = async () => {
-    try {
-      const { hydrateCloudSync, startCloudSyncScheduler } = await import('@/lib/cloudSync');
-      await hydrateCloudSync();
-      startCloudSyncScheduler();
-    } catch {
-      /* offline is fine */
-    }
+  const afterCloud = () => {
     router.replace('/');
+    void (async () => {
+      try {
+        const { hydrateCloudSync, startCloudSyncScheduler } = await import('@/lib/cloudSync');
+        startCloudSyncScheduler();
+        await hydrateCloudSync();
+      } catch {
+        /* offline is fine */
+      }
+    })();
   };
 
   const resetPassword = async () => {
@@ -109,7 +111,7 @@ export default function LoginScreen() {
       } else {
         await signInShopAccount({ email: identifier, password, shopCode });
       }
-      await afterCloud();
+      afterCloud();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't sign in.");
     } finally {
