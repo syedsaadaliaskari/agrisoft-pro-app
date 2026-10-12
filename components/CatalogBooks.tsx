@@ -163,7 +163,7 @@ export function ProductBooksTable({ query }: { query?: string }) {
       <ScrollView horizontal showsHorizontalScrollIndicator>
         <View>
           <View style={styles.row}>
-            <Head text="Name" width={140} />
+            <Head text="Name" width={200} />
             <Head text="Category" width={100} />
             <Head text="Unit" width={80} />
             <Head text="Cost" width={90} />
@@ -174,13 +174,16 @@ export function ProductBooksTable({ query }: { query?: string }) {
             <Head text="Actions" width={70} last />
           </View>
           {rows.length === 0 ? (
-            <View style={{ width: 780 }}>
+            <View style={{ width: 840 }}>
               <EmptyState title="No products" />
             </View>
           ) : (
             rows.map((row) => (
               <View key={row.id} style={styles.row}>
-                <Cell text={row.name} width={140} />
+                <Cell
+                  text={row.isCrop ? `${row.name} · Crop` : row.trackBatch ? `${row.name} · Batch and expiry` : row.name}
+                  width={200}
+                />
                 <Cell text={row.categoryName} width={100} />
                 <Cell text={row.unitName} width={80} />
                 <Cell text={money(row.costPrice)} width={90} />

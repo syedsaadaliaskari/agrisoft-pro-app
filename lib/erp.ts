@@ -1,5 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import {
+  CROP_PURCHASE_COLUMNS,
+  CROP_SALE_COLUMNS,
+  CROP_VEHICLE_COLUMNS,
+  ITEM_BATCH_COLUMNS,
+  PRODUCT_FLAG_COLUMNS,
+  STOCK_BATCH_COLUMNS,
+  requireCloudColumns,
+} from '@/lib/cloudSchema';
 import { newId } from '@/lib/id';
 import { moneyRound, resolveMoneySplit, resolveSettlement, type PaymentMode } from '@/lib/settlement';
 import { rememberDeleted } from '@/lib/tombstones';
@@ -17,7 +26,9 @@ export type VoucherType =
   | 'journal'
   | 'expense'
   | 'income'
-  | 'owner_draw';
+  | 'owner_draw'
+  | 'crop_purchase'
+  | 'crop_sale';
 
 export type ShopSettings = {
   shop_name: string;
@@ -87,6 +98,8 @@ export type Product = {
   taxId: string | null;
   reorderLevel: number;
   isActive: boolean;
+  trackBatch?: boolean;
+  isCrop?: boolean;
   updatedAt?: string;
   variants: Variant[];
 };
@@ -110,6 +123,77 @@ export type DocLine = {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  batchNo?: string;
+  expiryDate?: string;
+};
+
+export type StockBatch = {
+  id: string;
+  variantId: string;
+  batchNo: string;
+  expiryDate: string;
+  qty: number;
+  updatedAt?: string;
+};
+
+export type CropVehicle = {
+  id: string;
+  vehicleNo: string;
+  bags: number;
+  totalWeight: number;
+  kaat: number;
+  safiWeight: number;
+  rate: number;
+  amount: number;
+  lineOrder?: number;
+};
+
+export type CropPurchase = {
+  id: string;
+  voucherId: string;
+  docNo: string;
+  docDate: string;
+  partyType: 'customer' | 'vendor';
+  partyId: string;
+  partyName: string;
+  variantId: string;
+  productName: string;
+  safiWeight: number;
+  grossAmount: number;
+  commission: number;
+  brokerage: number;
+  mazdoori: number;
+  fees: number;
+  bardana: number;
+  deductionAmount: number;
+  netPayable: number;
+  paidAmount: number;
+  cashPaid: number;
+  bankPaid: number;
+  remarks: string;
+  status: 'completed';
+  vehicles: CropVehicle[];
+  updatedAt?: string;
+};
+
+export type CropSale = {
+  id: string;
+  voucherId: string;
+  docNo: string;
+  docDate: string;
+  customerId: string;
+  customerName: string;
+  variantId: string;
+  productName: string;
+  weight: number;
+  rate: number;
+  amount: number;
+  paidAmount: number;
+  cashPaid: number;
+  bankPaid: number;
+  remarks: string;
+  status: 'completed';
+  updatedAt?: string;
 };
 
 export type DocTotalsInput = {
@@ -229,6 +313,9 @@ type Store = {
   customers: Party[];
   vendors: Party[];
   products: Product[];
+  batches: StockBatch[];
+  cropPurchases: CropPurchase[];
+  cropSales: CropSale[];
   accounts: Account[];
   sales: SaleDoc[];
   purchases: PurchaseDoc[];
@@ -302,6 +389,9 @@ function seed(): Store {
     customers: [],
     vendors: [],
     products: [],
+    batches: [],
+    cropPurchases: [],
+    cropSales: [],
     accounts: [
       acc('1000', 'Assets', 'asset'),
       acc('1100', 'Cash', 'asset'),
@@ -340,6 +430,8 @@ function seed(): Store {
       customer: 1,
       vendor: 1,
       product: 1,
+      crop_purchase: 1,
+      crop_sale: 1,
     },
     counterIds: {},
     settingIds: {},
@@ -367,6 +459,12 @@ function nextDoc(kind: string) {
   const n = store.counters[kind] ?? 1;
   store.counters[kind] = n + 1;
   return `#${String(n).padStart(5, '0')}`;
+}
+function nextCropDoc(kind: 'crop_purchase' | 'crop_sale') {
+  const n = store.counters[kind] ?? 1;
+  store.counters[kind] = n + 1;
+  const prefix = kind === 'crop_purchase' ? 'CP' : 'CS';
+  return `${prefix}${String(n).padStart(5, '0')}`;
 }
 function accountByCode(code: string) {
   const row = store.accounts.find((a) => a.code === code && a.isActive);
@@ -442,7 +540,9 @@ export function computeDocTotals(
   };
 }
 
-function makeLines(items: { id?: string; variantId: string; quantity: number; unitPrice: number }[]): DocLine[] {
+function makeLines(
+  items: { id?: string; variantId: string; quantity: number; unitPrice: number; batchNo?: string; expiryDate?: string }[],
+): DocLine[] {
   return items.map((line) => {
     const found = findVariant(line.variantId);
     if (!found) throw new Error('Product not found.');
@@ -455,8 +555,45 @@ function makeLines(items: { id?: string; variantId: string; quantity: number; un
       quantity: line.quantity,
       unitPrice: line.unitPrice,
       lineTotal: line.quantity * line.unitPrice,
+      batchNo: line.batchNo?.trim() || '',
+      expiryDate: line.expiryDate?.trim() || '',
     };
   });
+}
+
+function positiveBatches(variantId: string) {
+  return store.batches
+    .filter((row) => row.variantId === variantId && row.qty > 0)
+    .sort((a, b) => (a.expiryDate || '9999').localeCompare(b.expiryDate || '9999'));
+}
+
+function receiveBatch(variantId: string, batchNo: string, expiryDate: string, qty: number) {
+  const key = batchNo.trim();
+  const existing = store.batches.find((row) => row.variantId === variantId && row.batchNo === key);
+  if (existing) {
+    existing.qty = moneyRound(existing.qty + qty);
+    if (expiryDate) existing.expiryDate = expiryDate;
+    existing.updatedAt = now();
+    return;
+  }
+  store.batches.push({
+    id: newId(),
+    variantId,
+    batchNo: key,
+    expiryDate,
+    qty: moneyRound(qty),
+    updatedAt: now(),
+  });
+}
+
+function takeBatch(variantId: string, batchNo: string, qty: number) {
+  const row = store.batches.find((item) => item.variantId === variantId && item.batchNo === batchNo);
+  if (!row) throw new Error(`Batch ${batchNo} was not found for this pack`);
+  if (row.qty < qty) {
+    throw new Error(`Batch ${row.batchNo} has ${moneyRound(row.qty)} left, and this line needs ${qty}`);
+  }
+  row.qty = moneyRound(row.qty - qty);
+  row.updatedAt = now();
 }
 
 function cashBankIds() {
@@ -507,6 +644,49 @@ function purchaseMoneyEntries(
     entries.push({ accountId: pay.id, debit: 0, credit: settled.due, narration });
   }
   const header = settled.cashPaid > 0 ? cash.id : settled.bankPaid > 0 ? bank.id : pay.id;
+  return { entries, headerAccountId: header };
+}
+
+function cropPurchaseEntries(
+  settled: { cashPaid: number; bankPaid: number; due: number },
+  netPayable: number,
+  partyType: 'customer' | 'vendor',
+  narration: string,
+) {
+  const { cash, bank } = cashBankIds();
+  const inventory = accountByCode('1400');
+  const dueAccount = partyType === 'customer' ? accountByCode('1300') : accountByCode('2100');
+  const entries: Array<Omit<VoucherEntry, 'id'> & { id?: string }> = [
+    { accountId: inventory.id, debit: netPayable, credit: 0, narration },
+  ];
+  if (settled.cashPaid > 0) entries.push({ accountId: cash.id, debit: 0, credit: settled.cashPaid, narration });
+  if (settled.bankPaid > 0) entries.push({ accountId: bank.id, debit: 0, credit: settled.bankPaid, narration });
+  if (settled.due > 0) entries.push({ accountId: dueAccount.id, debit: 0, credit: settled.due, narration });
+  const header = settled.cashPaid > 0 ? cash.id : settled.bankPaid > 0 ? bank.id : dueAccount.id;
+  return { entries, headerAccountId: header };
+}
+
+function cropSaleEntries(
+  settled: { cashPaid: number; bankPaid: number; due: number },
+  amount: number,
+  cost: number,
+  narration: string,
+) {
+  const { cash, bank } = cashBankIds();
+  const sales = accountByCode('4100');
+  const recv = accountByCode('1300');
+  const inventory = accountByCode('1400');
+  const cogs = accountByCode('5100');
+  const entries: Array<Omit<VoucherEntry, 'id'> & { id?: string }> = [];
+  if (settled.cashPaid > 0) entries.push({ accountId: cash.id, debit: settled.cashPaid, credit: 0, narration });
+  if (settled.bankPaid > 0) entries.push({ accountId: bank.id, debit: settled.bankPaid, credit: 0, narration });
+  if (settled.due > 0) entries.push({ accountId: recv.id, debit: settled.due, credit: 0, narration });
+  entries.push({ accountId: sales.id, debit: 0, credit: amount, narration });
+  if (cost > 0) {
+    entries.push({ accountId: cogs.id, debit: cost, credit: 0, narration });
+    entries.push({ accountId: inventory.id, debit: 0, credit: cost, narration });
+  }
+  const header = settled.cashPaid > 0 ? cash.id : settled.bankPaid > 0 ? bank.id : recv.id;
   return { entries, headerAccountId: header };
 }
 
@@ -623,6 +803,9 @@ function bumpCounter(kind: string, codes: string[]) {
 function migrateStore() {
   const blank = seed();
   store.counters = { ...blank.counters, ...store.counters };
+  store.batches = store.batches ?? [];
+  store.cropPurchases = store.cropPurchases ?? [];
+  store.cropSales = store.cropSales ?? [];
   for (const party of store.customers) {
     party.email = party.email ?? '';
     party.balanceType = party.balanceType ?? 'debit';
@@ -646,6 +829,8 @@ function migrateStore() {
     product.season = product.season ?? '';
     product.wholesalePrice = product.wholesalePrice ?? 0;
     product.brand = product.brand ?? '';
+    product.isCrop = Boolean(product.isCrop);
+    product.trackBatch = product.isCrop ? false : Boolean(product.trackBatch);
     product.variants = product.variants?.length
       ? product.variants.map((variant) => ({
           ...variant,
@@ -895,8 +1080,50 @@ export function inventoryRows() {
       reorderLevel: product.reorderLevel,
       isLow: variant.stockQty <= product.reorderLevel,
       isActive: product.isActive,
+      isCrop: Boolean(product.isCrop),
+      trackBatch: Boolean(product.trackBatch) && !product.isCrop,
     })),
   );
+}
+
+export function batchesForVariant(variantId: string) {
+  return positiveBatches(variantId).map((row) => ({
+    batchNo: row.batchNo,
+    expiryDate: row.expiryDate,
+    qty: row.qty,
+  }));
+}
+
+export function expiringBatches() {
+  const limit = new Date();
+  limit.setDate(limit.getDate() + 30);
+  const limitIso = limit.toISOString().slice(0, 10);
+  return store.batches
+    .filter((row) => row.qty > 0 && row.expiryDate && row.expiryDate.slice(0, 10) <= limitIso)
+    .map((row) => {
+      const found = findVariant(row.variantId);
+      return {
+        id: row.id,
+        product: found?.product.name ?? 'Product',
+        batchNo: row.batchNo,
+        expiryDate: row.expiryDate.slice(0, 10),
+        qty: row.qty,
+      };
+    })
+    .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+}
+
+export function cropProducts() {
+  return store.products
+    .filter((product) => product.isActive && product.isCrop)
+    .flatMap((product) =>
+      product.variants.map((variant) => ({
+        variantId: variant.id,
+        name: product.name,
+        detail: [variant.size, variant.color].filter(Boolean).join(' · '),
+        stockQty: variant.stockQty,
+      })),
+    );
 }
 
 async function saveNamed(
@@ -1006,6 +1233,8 @@ export async function saveProduct(input: {
   initialStock?: number;
   reorderLevel?: number;
   isActive?: boolean;
+  trackBatch?: boolean;
+  isCrop?: boolean;
   variants?: {
     id?: string;
     size?: string;
@@ -1024,6 +1253,11 @@ export async function saveProduct(input: {
   const opening = Number(input.initialStock ?? input.stockQty ?? 0);
   if (!existing && (Number.isNaN(opening) || opening < 0)) {
     throw new Error('Initial stock must be a non-negative number');
+  }
+  const isCrop = Boolean(input.isCrop ?? existing?.isCrop);
+  const trackBatch = isCrop ? false : Boolean(input.trackBatch ?? existing?.trackBatch);
+  if (isCrop || trackBatch) {
+    await requireCloudColumns([{ table: 'products', columns: PRODUCT_FLAG_COLUMNS }]);
   }
   const sku = input.sku?.trim() || existing?.sku || nextDoc('product');
   const seedPack = {
@@ -1080,6 +1314,8 @@ export async function saveProduct(input: {
     taxId: input.taxId ?? existing?.taxId ?? null,
     reorderLevel: input.reorderLevel ?? existing?.reorderLevel ?? 5,
     isActive: input.isActive ?? existing?.isActive ?? true,
+    trackBatch,
+    isCrop,
     updatedAt: now(),
     variants: variants.map((variant) => ({ ...variant, productId: existing?.id ?? '' })),
   };
@@ -1144,7 +1380,7 @@ function postVoucher(
   return row;
 }
 
-type LineInput = { variantId: string; quantity: number; unitPrice: number };
+type LineInput = { variantId: string; quantity: number; unitPrice: number; batchNo?: string; expiryDate?: string };
 type MoneyBits = {
   discountAmount?: number;
   additionAmount?: number;
@@ -1162,9 +1398,49 @@ export async function createSale(input: {
   items: LineInput[];
 } & MoneyBits) {
   if (!input.items.length) throw new Error('Add at least one item.');
+  const prepared = input.items.map((line) => ({ ...line }));
+  const batchNeed = new Map<string, number>();
+  let needsCloudBatch = false;
+  for (const line of prepared) {
+    const found = findVariant(line.variantId);
+    if (!found) throw new Error('Product not found.');
+    if (found.product.isCrop) throw new Error('Crops are sold on the crop slip.');
+    if (found.product.trackBatch) {
+      const rows = positiveBatches(line.variantId);
+      if (rows.length) {
+        const wanted = line.batchNo?.trim() ?? '';
+        const picked = wanted ? rows.find((row) => row.batchNo === wanted) : rows[0];
+        if (!picked) throw new Error(`Batch ${wanted} was not found for this pack`);
+        const key = `${line.variantId}::${picked.batchNo}`;
+        const nextQty = (batchNeed.get(key) ?? 0) + line.quantity;
+        if (nextQty > picked.qty) {
+          throw new Error(`Batch ${picked.batchNo} has ${moneyRound(picked.qty)} left, and this line needs ${nextQty}`);
+        }
+        batchNeed.set(key, nextQty);
+        line.batchNo = picked.batchNo;
+        line.expiryDate = picked.expiryDate;
+        needsCloudBatch = true;
+      } else {
+        line.batchNo = '';
+        line.expiryDate = '';
+      }
+    } else {
+      line.batchNo = '';
+      line.expiryDate = '';
+    }
+  }
+  if (needsCloudBatch) {
+    await requireCloudColumns([
+      { table: 'sale_items', columns: ITEM_BATCH_COLUMNS },
+      { table: 'stock_batches', columns: STOCK_BATCH_COLUMNS },
+    ]);
+  }
   const customer = input.customerId ? getCustomer(input.customerId) : null;
-  const items = makeLines(input.items);
-  for (const line of items) bumpStock(line.variantId, -line.quantity);
+  const items = makeLines(prepared);
+  for (const line of items) {
+    if (line.batchNo) takeBatch(line.variantId, line.batchNo, line.quantity);
+    bumpStock(line.variantId, -line.quantity);
+  }
   const totals = computeDocTotals(
     items.reduce((s, l) => s + l.lineTotal, 0),
     input,
@@ -1269,8 +1545,35 @@ export async function createPurchase(input: {
   if (!input.items.length) throw new Error('Add at least one item.');
   const vendor = input.vendorId ? getVendor(input.vendorId) : null;
   if (!vendor) throw new Error('Choose a vendor.');
-  const items = makeLines(input.items);
-  for (const line of items) bumpStock(line.variantId, line.quantity);
+  const prepared = input.items.map((line) => ({ ...line }));
+  let needsCloudBatch = false;
+  for (const line of prepared) {
+    const found = findVariant(line.variantId);
+    if (!found) throw new Error('Product not found.');
+    if (found.product.isCrop) throw new Error('Crops are bought on the crop slip.');
+    if (found.product.trackBatch) {
+      const batchNo = line.batchNo?.trim() ?? '';
+      const expiryDate = line.expiryDate?.trim() ?? '';
+      if (!batchNo || !expiryDate) throw new Error(`${found.product.name}: batch number and expiry are required`);
+      line.batchNo = batchNo;
+      line.expiryDate = expiryDate;
+      needsCloudBatch = true;
+    } else {
+      line.batchNo = '';
+      line.expiryDate = '';
+    }
+  }
+  if (needsCloudBatch) {
+    await requireCloudColumns([
+      { table: 'purchase_items', columns: ITEM_BATCH_COLUMNS },
+      { table: 'stock_batches', columns: STOCK_BATCH_COLUMNS },
+    ]);
+  }
+  const items = makeLines(prepared);
+  for (const line of items) {
+    bumpStock(line.variantId, line.quantity);
+    if (line.batchNo) receiveBatch(line.variantId, line.batchNo, line.expiryDate || '', line.quantity);
+  }
   const totals = computeDocTotals(
     items.reduce((s, l) => s + l.lineTotal, 0),
     input,
@@ -1780,6 +2083,213 @@ export function accountLedger(accountId: string, from?: string, to?: string) {
   return { account, lines, closing: balance };
 }
 
+function cropCharge(value: number, label: string) {
+  const amount = moneyRound(value);
+  if (Number.isNaN(amount) || amount < 0) throw new Error(`${label} cannot be negative`);
+  return amount;
+}
+
+export async function createCropPurchase(input: {
+  docDate: string;
+  partyType: 'customer' | 'vendor';
+  partyId: string;
+  variantId: string;
+  vehicles: { vehicleNo: string; bags: number; totalWeight: number; kaat: number; rate: number }[];
+  commission?: number;
+  brokerage?: number;
+  mazdoori?: number;
+  fees?: number;
+  bardana?: number;
+  cashPaid?: number;
+  bankPaid?: number;
+  remarks?: string;
+}) {
+  if (!input.docDate?.trim()) throw new Error('Date is required');
+  if (input.partyType !== 'customer' && input.partyType !== 'vendor') throw new Error('Choose a farmer or a supplier');
+  if (!input.partyId) throw new Error(input.partyType === 'customer' ? 'Farmer is required' : 'Supplier is required');
+  if (!input.variantId) throw new Error('Crop is required');
+  if (!input.vehicles?.length) throw new Error('Add at least one vehicle');
+  const found = findVariant(input.variantId);
+  if (!found) throw new Error('Crop pack was not found');
+  if (!found.product.isCrop) throw new Error('Mark this product as a crop on the product page first');
+  const party =
+    input.partyType === 'customer' ? store.customers.find((row) => row.id === input.partyId && row.isActive) : store.vendors.find((row) => row.id === input.partyId && row.isActive);
+  if (!party) throw new Error('That person was not found');
+
+  const vehicles: CropVehicle[] = input.vehicles.map((vehicle, index) => {
+    const vehicleNo = String(vehicle.vehicleNo ?? '').trim();
+    const bags = num(vehicle.bags);
+    const totalWeight = num(vehicle.totalWeight);
+    const kaat = num(vehicle.kaat);
+    const rate = num(vehicle.rate);
+    if (!vehicleNo) throw new Error(`Vehicle ${index + 1}: number is required`);
+    if (!(totalWeight > 0)) throw new Error(`Vehicle ${index + 1}: total weight must be greater than 0`);
+    if (Number.isNaN(kaat) || kaat < 0) throw new Error(`Vehicle ${index + 1}: kaat cannot be negative`);
+    if (kaat >= totalWeight) throw new Error(`Vehicle ${index + 1}: kaat must be less than total weight`);
+    if (Number.isNaN(rate) || rate < 0) throw new Error(`Vehicle ${index + 1}: rate is invalid`);
+    const safiWeight = moneyRound(totalWeight - kaat);
+    return {
+      id: newId(),
+      vehicleNo,
+      bags: moneyRound(Number.isNaN(bags) ? 0 : bags),
+      totalWeight: moneyRound(totalWeight),
+      kaat: moneyRound(kaat),
+      safiWeight,
+      rate: moneyRound(rate),
+      amount: moneyRound(safiWeight * rate),
+    };
+  });
+  const charges = {
+    commission: cropCharge(num(input.commission), 'commission'),
+    brokerage: cropCharge(num(input.brokerage), 'brokerage'),
+    mazdoori: cropCharge(num(input.mazdoori), 'mazdoori'),
+    fees: cropCharge(num(input.fees), 'fees'),
+    bardana: cropCharge(num(input.bardana), 'bardana'),
+  };
+  const grossAmount = moneyRound(vehicles.reduce((sum, vehicle) => sum + vehicle.amount, 0));
+  const deductionAmount = moneyRound(
+    charges.commission + charges.brokerage + charges.mazdoori + charges.fees + charges.bardana,
+  );
+  const netPayable = moneyRound(grossAmount - deductionAmount);
+  if (netPayable < 0) throw new Error('Deductions are higher than the crop amount');
+  const safiWeight = moneyRound(vehicles.reduce((sum, vehicle) => sum + vehicle.safiWeight, 0));
+  const settled = resolveSettlement({
+    grandTotal: netPayable,
+    cashPaid: input.cashPaid,
+    bankPaid: input.bankPaid,
+  });
+  if ('error' in settled) throw new Error(settled.error);
+  await requireCloudColumns([
+    { table: 'crop_purchases', columns: CROP_PURCHASE_COLUMNS },
+    { table: 'crop_purchase_vehicles', columns: CROP_VEHICLE_COLUMNS },
+  ]);
+
+  const docNo = input.partyType === 'customer' ? nextCropDoc('crop_purchase') : nextDoc('purchase');
+  const docDate = input.docDate.trim();
+  const legs = cropPurchaseEntries(settled, netPayable, input.partyType, `Crop purchase ${docNo}`);
+  const voucher = postVoucher({
+    voucherNo: docNo,
+    voucherType: input.partyType === 'customer' ? 'crop_purchase' : 'purchase',
+    voucherDate: docDate,
+    partyId: party.id,
+    partyName: party.name,
+    accountId: legs.headerAccountId,
+    referenceNo: docNo,
+    notes: input.remarks?.trim() ?? '',
+    grandTotal: netPayable,
+    entries: legs.entries,
+  });
+  bumpStock(found.variant.id, safiWeight);
+  if (safiWeight > 0) {
+    const cost = moneyRound(netPayable / safiWeight);
+    found.variant.costPrice = cost;
+    found.product.costPrice = cost;
+  }
+  const doc: CropPurchase = {
+    id: newId(),
+    voucherId: voucher.id,
+    docNo,
+    docDate,
+    partyType: input.partyType,
+    partyId: party.id,
+    partyName: party.name,
+    variantId: found.variant.id,
+    productName: found.product.name,
+    safiWeight,
+    grossAmount,
+    ...charges,
+    deductionAmount,
+    netPayable,
+    paidAmount: settled.paidAmount,
+    cashPaid: settled.cashPaid,
+    bankPaid: settled.bankPaid,
+    remarks: input.remarks?.trim() ?? '',
+    status: 'completed',
+    vehicles,
+    updatedAt: now(),
+  };
+  store.cropPurchases.unshift(doc);
+  audit('crop', 'purchase', doc.docNo);
+  await persist();
+  emit();
+  return doc;
+}
+
+export async function createCropSale(input: {
+  docDate: string;
+  customerId: string;
+  variantId: string;
+  weight: number;
+  rate: number;
+  cashPaid?: number;
+  bankPaid?: number;
+  remarks?: string;
+}) {
+  if (!input.docDate?.trim()) throw new Error('Date is required');
+  if (!input.customerId) throw new Error('Buyer is required');
+  if (!input.variantId) throw new Error('Crop is required');
+  const weight = num(input.weight);
+  const rate = num(input.rate);
+  if (!(weight > 0)) throw new Error('Weight must be greater than 0');
+  if (Number.isNaN(rate) || rate < 0) throw new Error('Rate is invalid');
+  const found = findVariant(input.variantId);
+  if (!found) throw new Error('Crop pack was not found');
+  if (!found.product.isCrop) throw new Error('Mark this product as a crop on the product page first');
+  if (found.variant.stockQty < weight) throw new Error(`Only ${moneyRound(found.variant.stockQty)} is in stock`);
+  const customer = store.customers.find((row) => row.id === input.customerId && row.isActive);
+  if (!customer) throw new Error('Buyer was not found');
+  const amount = moneyRound(weight * rate);
+  const settled = resolveSettlement({
+    grandTotal: amount,
+    cashPaid: input.cashPaid,
+    bankPaid: input.bankPaid,
+  });
+  if ('error' in settled) throw new Error(settled.error);
+  await requireCloudColumns([{ table: 'crop_sales', columns: CROP_SALE_COLUMNS }]);
+
+  const docNo = nextCropDoc('crop_sale');
+  const docDate = input.docDate.trim();
+  const cost = moneyRound(weight * Number(found.variant.costPrice || found.product.costPrice || 0));
+  const legs = cropSaleEntries(settled, amount, cost, `Crop sale ${docNo}`);
+  const voucher = postVoucher({
+    voucherNo: docNo,
+    voucherType: 'crop_sale',
+    voucherDate: docDate,
+    partyId: customer.id,
+    partyName: customer.name,
+    accountId: legs.headerAccountId,
+    referenceNo: docNo,
+    notes: input.remarks?.trim() ?? '',
+    grandTotal: amount,
+    entries: legs.entries,
+  });
+  bumpStock(found.variant.id, -weight);
+  const doc: CropSale = {
+    id: newId(),
+    voucherId: voucher.id,
+    docNo,
+    docDate,
+    customerId: customer.id,
+    customerName: customer.name,
+    variantId: found.variant.id,
+    productName: found.product.name,
+    weight: moneyRound(weight),
+    rate: moneyRound(rate),
+    amount,
+    paidAmount: settled.paidAmount,
+    cashPaid: settled.cashPaid,
+    bankPaid: settled.bankPaid,
+    remarks: input.remarks?.trim() ?? '',
+    status: 'completed',
+    updatedAt: now(),
+  };
+  store.cropSales.unshift(doc);
+  audit('crop', 'sale', doc.docNo);
+  await persist();
+  emit();
+  return doc;
+}
+
 export function partyLedger(kind: 'customer' | 'vendor', partyId: string, from?: string, to?: string) {
   const party = kind === 'customer' ? getCustomer(partyId) : getVendor(partyId);
   if (!party) throw new Error('Party not found.');
@@ -1788,7 +2298,31 @@ export function partyLedger(kind: 'customer' | 'vendor', partyId: string, from?:
   const rows = [...store.vouchers]
     .filter((v) => v.status === 'posted' && v.partyId === partyId)
     .sort((a, b) => a.voucherDate.localeCompare(b.voucherDate));
+  const receivables = store.accounts.find((account) => account.code === '1300');
   for (const voucher of rows) {
+    const cropDue =
+      kind === 'customer' && receivables
+        ? voucher.voucherType === 'crop_purchase'
+          ? voucher.entries.filter((entry) => entry.accountId === receivables.id).reduce((sum, entry) => sum + entry.credit, 0)
+          : voucher.voucherType === 'crop_sale'
+            ? voucher.entries.filter((entry) => entry.accountId === receivables.id).reduce((sum, entry) => sum + entry.debit, 0)
+            : null
+        : null;
+    if (cropDue != null) {
+      balance += voucher.voucherType === 'crop_purchase' ? -cropDue : cropDue;
+      if (cropDue > 0 && inRange(voucher.voucherDate, from, to)) {
+        lines.push({
+          date: voucher.voucherDate,
+          voucherNo: voucher.voucherNo,
+          voucherType: voucher.voucherType,
+          narration: voucher.notes,
+          debit: voucher.voucherType === 'crop_sale' ? cropDue : 0,
+          credit: voucher.voucherType === 'crop_purchase' ? cropDue : 0,
+          balance,
+        });
+      }
+      continue;
+    }
     const debit = voucher.entries.reduce((s, e) => s + e.debit, 0);
     const credit = voucher.entries.reduce((s, e) => s + e.credit, 0);
     const amount = kind === 'customer' ? debit - credit : credit - debit;
@@ -2220,6 +2754,9 @@ export async function applyCloudSnapshot(patch: {
   accounts?: Account[];
   sales?: SaleDoc[];
   purchases?: PurchaseDoc[];
+  batches?: StockBatch[];
+  cropPurchases?: CropPurchase[];
+  cropSales?: CropSale[];
   saleReturns?: ReturnDoc[];
   purchaseReturns?: ReturnDoc[];
   vouchers?: Voucher[];
@@ -2242,6 +2779,9 @@ export async function applyCloudSnapshot(patch: {
     if (patch.accounts?.length) store.accounts = patch.accounts;
     if (patch.sales) store.sales = patch.sales;
     if (patch.purchases) store.purchases = patch.purchases;
+    if (patch.batches) store.batches = patch.batches;
+    if (patch.cropPurchases) store.cropPurchases = patch.cropPurchases;
+    if (patch.cropSales) store.cropSales = patch.cropSales;
     if (patch.saleReturns) store.saleReturns = patch.saleReturns;
     if (patch.purchaseReturns) store.purchaseReturns = patch.purchaseReturns;
     if (patch.vouchers) store.vouchers = patch.vouchers;

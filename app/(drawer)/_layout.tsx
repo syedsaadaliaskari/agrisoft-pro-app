@@ -46,6 +46,9 @@ export default function AppLayout() {
       <Stack.Screen name="sales/returns" options={{ title: tNav('Sale return') }} />
       <Stack.Screen name="purchases/index" options={{ title: tNav('Purchase') }} />
       <Stack.Screen name="purchases/returns" options={{ title: tNav('Purchase return') }} />
+      <Stack.Screen name="crop/buy-farmer" options={{ title: tNav('Buy from farmer') }} />
+      <Stack.Screen name="crop/buy-supplier" options={{ title: tNav('Buy from supplier') }} />
+      <Stack.Screen name="crop/sell" options={{ title: tNav('Sell crop') }} />
       <Stack.Screen name="parties/customers" options={{ title: tNav('Customers') }} />
       <Stack.Screen name="parties/vendors" options={{ title: tNav('Vendors') }} />
       <Stack.Screen name="catalog/units" options={{ title: tNav('Units') }} />
@@ -75,7 +78,7 @@ export default function AppLayout() {
       <Stack.Screen name="platform/licenses" options={{ title: tNav('Activated list') }} />
       <Stack.Screen name="platform/messages" options={{ title: tNav('Messages') }} />
       <Stack.Screen name="settings/index" options={{ title: tNav('Settings') }} />
-      <Stack.Screen name="settings/license" options={{ title: tNav('License') }} />
+      <Stack.Screen name="settings/license" options={{ title: tNav('Activate company') }} />
       <Stack.Screen name="settings/users" options={{ title: tNav('Users & roles') }} />
       <Stack.Screen name="settings/password" options={{ title: tNav('Update password') }} />
       <Stack.Screen name="settings/backup" options={{ title: tNav('Backup') }} />

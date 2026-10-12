@@ -42,6 +42,8 @@ export function ProductForm({ productId }: { productId?: string }) {
   const [costPrice, setCostPrice] = useState(String(existing?.costPrice ?? ''));
   const [reorder, setReorder] = useState(String(existing?.reorderLevel ?? 5));
   const [initialStock, setInitialStock] = useState('0');
+  const [isCrop, setIsCrop] = useState(existing?.isCrop ?? false);
+  const [trackBatch, setTrackBatch] = useState(existing?.isCrop ? false : (existing?.trackBatch ?? false));
   const [packs, setPacks] = useState<Pack[]>(
     existing?.variants.length
       ? existing.variants.map((v) => ({
@@ -114,6 +116,47 @@ export function ProductForm({ productId }: { productId?: string }) {
               hint="Qty already on the shelf for the first pack"
             />
           ) : null}
+          <Pressable
+            onPress={() => {
+              setIsCrop((on) => !on);
+              setTrackBatch(false);
+            }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 }}>
+            <View
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 4,
+                borderWidth: 2,
+                borderColor: colors.tint,
+                backgroundColor: isCrop ? colors.tint : 'transparent',
+              }}
+            />
+            <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }}>
+              This is a crop (wheat, cotton, and other weighed crops)
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setTrackBatch((on) => !on);
+              setIsCrop(false);
+            }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 }}>
+            <View
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 4,
+                borderWidth: 2,
+                borderColor: colors.tint,
+                backgroundColor: !isCrop && trackBatch ? colors.tint : 'transparent',
+              }}
+            />
+            <Text style={{ color: colors.text, fontWeight: '700', flex: 1 }}>Track batch number and expiry</Text>
+          </Pressable>
+          <Text style={{ color: colors.muted }}>
+            Batch and expiry show on the normal purchase and sale. A crop opens its own slip.
+          </Text>
           {Number(costPrice) > 0 && Number(salePrice) >= 0 && Number(salePrice) < Number(costPrice) ? (
             <Text style={{ color: colors.danger, fontWeight: '700' }}>
               Sale price is below cost by {money(Number(costPrice) - Number(salePrice))} per unit.
@@ -172,6 +215,8 @@ export function ProductForm({ productId }: { productId?: string }) {
                 salePrice: Number(salePrice) || 0,
                 costPrice: Number(costPrice) || 0,
                 reorderLevel: Number(reorder) || 0,
+                isCrop,
+                trackBatch: isCrop ? false : trackBatch,
                 initialStock: existing ? undefined : Number(initialStock),
                 variants: packs.map((pack, index) => ({
                   id: pack.id,

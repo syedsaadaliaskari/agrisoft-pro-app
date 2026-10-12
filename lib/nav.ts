@@ -23,6 +23,13 @@ export const shopNavigation: NavGroup[] = [
     items: [
       { label: 'Dashboard', href: '/', icon: 'grid-outline', permission: 'dashboard.view', audience: 'both' },
       {
+        label: 'Activate company',
+        href: '/settings/license',
+        icon: 'ribbon-outline',
+        permission: 'license.manage',
+        audience: 'platform',
+      },
+      {
         label: 'Activated list',
         href: '/platform/licenses',
         icon: 'key-outline',
@@ -52,6 +59,15 @@ export const shopNavigation: NavGroup[] = [
     items: [
       { label: 'Purchase', href: '/purchases', icon: 'bag-add-outline', permission: 'purchases.view', audience: 'shop' },
       { label: 'Purchase return', href: '/purchases/returns', icon: 'bag-remove-outline', permission: 'purchases.return', audience: 'shop' },
+    ],
+  },
+  {
+    title: 'Crop trading',
+    icon: 'leaf-outline',
+    items: [
+      { label: 'Buy from farmer', href: '/crop/buy-farmer', icon: 'leaf-outline', permission: 'purchases.view', audience: 'shop' },
+      { label: 'Buy from supplier', href: '/crop/buy-supplier', icon: 'leaf-outline', permission: 'purchases.view', audience: 'shop' },
+      { label: 'Sell crop', href: '/crop/sell', icon: 'leaf-outline', permission: 'sales.view', audience: 'shop' },
     ],
   },
   {

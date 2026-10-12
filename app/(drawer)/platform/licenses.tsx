@@ -72,9 +72,7 @@ export default function ActivatedListScreen() {
         {error ? <Text style={[styles.err, { color: colors.danger }]}>{error}</Text> : null}
         {!loading && !visible.length ? (
           <Card title="Activated list">
-            <Text style={{ color: colors.text, fontWeight: '600' }}>
-              On desktop Super Admin → Activated list → Upload to phone
-            </Text>
+            <Text style={{ color: colors.text, fontWeight: '600' }}>No activated companies yet.</Text>
           </Card>
         ) : (
           visible.map((row) => {

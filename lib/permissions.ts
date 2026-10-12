@@ -51,6 +51,7 @@ export function isSuperAdminUser(user: SessionUser | null | undefined): boolean 
 
 export const VENDOR_CONSOLE_PERMISSIONS = new Set([
   'dashboard.view',
+  'license.manage',
   'license.view',
   'platform.view',
   'settings.manage',

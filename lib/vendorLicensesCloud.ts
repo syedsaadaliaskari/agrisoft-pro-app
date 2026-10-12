@@ -7,7 +7,7 @@ function asPlan(value: unknown): LicensePlan {
   return 'yearly';
 }
 
-/** Live read of public.licenses. Phone never writes this table. */
+/** Live read of public.licenses. Activation writes go through activate_vendor_license. */
 export async function fetchCloudLicenses(): Promise<CloudLicense[]> {
   const client = getSupabase();
   const { hasAnonKey } = getAppConfig();

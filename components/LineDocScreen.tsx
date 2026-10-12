@@ -13,6 +13,7 @@ import {
   createSale,
   getPurchase,
   getSale,
+  batchesForVariant,
   inventoryRows,
   listAdditions,
   listCustomers,
@@ -25,6 +26,7 @@ import {
   updateSale,
   type PaymentMode,
 } from '@/lib/erp';
+import { newId } from '@/lib/id';
 import { moneyRound } from '@/lib/settlement';
 import { printHtml, purchasePrintHtml, salePrintHtml } from '@/lib/print';
 
@@ -32,7 +34,18 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-type Cart = { variantId: string; name: string; quantity: number; unitPrice: number };
+type Cart = {
+  key: string;
+  variantId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  trackBatch: boolean;
+  batchNo: string;
+  expiryDate: string;
+  batchQty: number | null;
+  batches: { batchNo: string; expiryDate: string; qty: number }[];
+};
 
 function seedPay(existing: { cashPaid?: number; bankPaid?: number; paidAmount: number; paymentMode: PaymentMode } | null, kind: 'sale' | 'purchase') {
   if (!existing) {
@@ -76,10 +89,16 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
   const [tax, setTax] = useState(String(existing?.taxAmount ?? 0));
   const [cart, setCart] = useState<Cart[]>(
     existing?.items.map((line) => ({
+      key: line.id,
       variantId: line.variantId,
       name: line.productName,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
+      trackBatch: false,
+      batchNo: '',
+      expiryDate: '',
+      batchQty: null,
+      batches: [],
     })) ?? [],
   );
   const [pick, setPick] = useState<'party' | 'item' | 'tax' | 'discount' | 'addition' | null>(null);
@@ -114,9 +133,68 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
 
   const add = (row: (typeof stock)[number]) => {
     setCart((cur) => {
-      const found = cur.find((l) => l.variantId === row.variantId);
-      if (found) return cur.map((l) => (l.variantId === row.variantId ? { ...l, quantity: l.quantity + 1 } : l));
-      return [...cur, { variantId: row.variantId, name: row.name, quantity: 1, unitPrice: kind === 'sale' ? row.salePrice : row.costPrice }];
+      const price = kind === 'sale' ? row.salePrice : row.costPrice;
+      if (!editId && row.trackBatch && kind === 'sale') {
+        const batches = batchesForVariant(row.variantId);
+        const first = batches[0];
+        const batchNo = first?.batchNo ?? '';
+        const found = cur.find((line) => line.variantId === row.variantId && line.batchNo === batchNo);
+        if (found) {
+          const cap = found.batchQty;
+          return cur.map((line) =>
+            line.key === found.key ? { ...line, quantity: cap == null ? line.quantity + 1 : Math.min(cap, line.quantity + 1) } : line,
+          );
+        }
+        return [
+          ...cur,
+          {
+            key: newId(),
+            variantId: row.variantId,
+            name: row.name,
+            quantity: first && first.qty < 1 ? first.qty : 1,
+            unitPrice: price,
+            trackBatch: true,
+            batchNo,
+            expiryDate: first?.expiryDate ?? '',
+            batchQty: first ? first.qty : null,
+            batches,
+          },
+        ];
+      }
+      if (!editId && row.trackBatch && kind === 'purchase') {
+        return [
+          ...cur,
+          {
+            key: newId(),
+            variantId: row.variantId,
+            name: row.name,
+            quantity: 1,
+            unitPrice: price,
+            trackBatch: true,
+            batchNo: '',
+            expiryDate: '',
+            batchQty: null,
+            batches: [],
+          },
+        ];
+      }
+      const found = cur.find((line) => line.variantId === row.variantId && !line.trackBatch);
+      if (found) return cur.map((line) => (line.key === found.key ? { ...line, quantity: line.quantity + 1 } : line));
+      return [
+        ...cur,
+        {
+          key: row.variantId,
+          variantId: row.variantId,
+          name: row.name,
+          quantity: 1,
+          unitPrice: price,
+          trackBatch: false,
+          batchNo: '',
+          expiryDate: '',
+          batchQty: null,
+          batches: [],
+        },
+      ];
     });
     setPick(null);
   };
@@ -147,7 +225,12 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
     taxAmount: totals.taxAmount,
     cashPaid: Number(cashPaid || 0),
     bankPaid: Number(bankPaid || 0),
-    items: cart.map((l) => ({ variantId: l.variantId, quantity: l.quantity, unitPrice: l.unitPrice })),
+    items: cart.map((l) => ({
+      variantId: l.variantId,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      ...(editId ? {} : { batchNo: l.batchNo, expiryDate: l.expiryDate }),
+    })),
   };
 
   const save = async (andShare: boolean) => {
@@ -184,20 +267,95 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
             onPress={() => setPick('party')}
           />
           <PrimaryButton label="Add item" tone="ghost" color={colors.tint} onPress={() => setPick('item')} />
+          {!editId && cart.some((line) => line.trackBatch) ? (
+            <View style={styles.line}>
+              <Text style={{ color: colors.muted, fontWeight: '800', flex: 1 }}>Batch</Text>
+              <Text style={{ color: colors.muted, fontWeight: '800' }}>Expiry</Text>
+            </View>
+          ) : null}
           {cart.map((line) => (
-            <View key={line.variantId} style={styles.line}>
-              <Text style={{ color: colors.text, fontWeight: '800', flex: 1 }}>{line.name}</Text>
-              <Pressable onPress={() => setCart((cur) => cur.map((l) => (l.variantId === line.variantId ? { ...l, quantity: Math.max(1, l.quantity - 1) } : l)))}>
-                <Text style={{ color: colors.tint, fontWeight: '800' }}>−</Text>
-              </Pressable>
-              <Text style={{ color: colors.text, fontWeight: '800' }}>{line.quantity}</Text>
-              <Pressable onPress={() => setCart((cur) => cur.map((l) => (l.variantId === line.variantId ? { ...l, quantity: l.quantity + 1 } : l)))}>
-                <Text style={{ color: colors.tint, fontWeight: '800' }}>+</Text>
-              </Pressable>
-              <Pressable onPress={() => setCart((cur) => cur.filter((l) => l.variantId !== line.variantId))}>
-                <Text style={{ color: colors.danger, fontWeight: '800' }}>×</Text>
-              </Pressable>
-              <Text style={{ color: colors.muted }}>{money(line.quantity * line.unitPrice)}</Text>
+            <View key={line.key} style={{ gap: 6 }}>
+              <View style={styles.line}>
+                <Text style={{ color: colors.text, fontWeight: '800', flex: 1 }}>{line.name}</Text>
+                <Pressable
+                  onPress={() =>
+                    setCart((cur) =>
+                      cur.map((item) => {
+                        if (item.key !== line.key) return item;
+                        const floor = item.batchQty != null && item.batchQty < 1 ? item.batchQty : 1;
+                        return { ...item, quantity: Math.max(floor, item.quantity - 1) };
+                      }),
+                    )
+                  }>
+                  <Text style={{ color: colors.tint, fontWeight: '800' }}>−</Text>
+                </Pressable>
+                <Text style={{ color: colors.text, fontWeight: '800' }}>{line.quantity}</Text>
+                <Pressable
+                  onPress={() =>
+                    setCart((cur) =>
+                      cur.map((item) => {
+                        if (item.key !== line.key) return item;
+                        const next = item.quantity + 1;
+                        if (kind === 'sale' && item.batchQty != null && next > item.batchQty) return item;
+                        return { ...item, quantity: next };
+                      }),
+                    )
+                  }>
+                  <Text style={{ color: colors.tint, fontWeight: '800' }}>+</Text>
+                </Pressable>
+                <Pressable onPress={() => setCart((cur) => cur.filter((item) => item.key !== line.key))}>
+                  <Text style={{ color: colors.danger, fontWeight: '800' }}>×</Text>
+                </Pressable>
+                <Text style={{ color: colors.muted }}>{money(line.quantity * line.unitPrice)}</Text>
+              </View>
+              {!editId && cart.some((item) => item.trackBatch) ? (
+                line.trackBatch && kind === 'purchase' ? (
+                  <View style={{ gap: 8 }}>
+                    <Field
+                      label="Batch"
+                      value={line.batchNo}
+                      onChangeText={(value) => setCart((cur) => cur.map((item) => (item.key === line.key ? { ...item, batchNo: value } : item)))}
+                    />
+                    <Field
+                      label="Expiry"
+                      value={line.expiryDate}
+                      onChangeText={(value) => setCart((cur) => cur.map((item) => (item.key === line.key ? { ...item, expiryDate: value } : item)))}
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </View>
+                ) : line.trackBatch && kind === 'sale' && line.batches.length ? (
+                  <View style={{ gap: 6 }}>
+                    {line.batches.map((batch) => (
+                      <Pressable
+                        key={batch.batchNo}
+                        onPress={() =>
+                          setCart((cur) =>
+                            cur.map((item) =>
+                              item.key === line.key
+                                ? {
+                                    ...item,
+                                    batchNo: batch.batchNo,
+                                    expiryDate: batch.expiryDate,
+                                    batchQty: batch.qty,
+                                    quantity: Math.min(item.quantity, batch.qty),
+                                  }
+                                : item,
+                            ),
+                          )
+                        }
+                        style={{ minHeight: 44, justifyContent: 'center' }}>
+                        <Text style={{ color: line.batchNo === batch.batchNo ? colors.tint : colors.text, fontWeight: '800' }}>
+                          {batch.batchNo} · {batch.expiryDate || '—'} · Qty {batch.qty}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : line.trackBatch && kind === 'sale' ? (
+                  <Text style={{ color: colors.muted }}>No batch rows yet. This sale uses the open pile.</Text>
+                ) : (
+                  <Text style={{ color: colors.muted }}>Batch — · Expiry —</Text>
+                )
+              ) : null}
             </View>
           ))}
           <TotalRow label="Subtotal" value={money(totals.subtotal)} />
@@ -268,7 +426,7 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
         ) : null}
         {pick === 'item' ? (
           <Card title="Items">
-            {stock.map((row) => (
+            {stock.filter((row) => !row.isCrop).map((row) => (
               <Pressable key={row.variantId} onPress={() => add(row)} style={{ minHeight: 48, justifyContent: 'center' }}>
                 <Text style={{ color: colors.text, fontWeight: '700' }}>{row.name}</Text>
                 <Text style={{ color: colors.muted }}>

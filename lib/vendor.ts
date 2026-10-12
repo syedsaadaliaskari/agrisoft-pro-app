@@ -7,8 +7,10 @@ import {
   type LicensePlan,
   type LicenseRow,
 } from '@/lib/activation';
+import { getDeviceLicense } from '@/lib/deviceLicense';
 import { newId } from '@/lib/id';
 import { getSupabase } from '@/lib/supabase';
+import { isVendorUnlocked } from '@/lib/vendorUnlock';
 
 export type ClientCompany = {
   id: string;
@@ -177,6 +179,16 @@ export async function listLicenses(): Promise<LicenseRow[]> {
   );
 }
 
+function describeLicenseSaveError(error: { message?: string }): string {
+  const message = error.message || '';
+  if (/activate_vendor_license|schema cache|could not find the function/i.test(message)) {
+    return 'Cloud activation is not ready yet.';
+  }
+  if (/this phone/i.test(message)) return 'Enter the customer Install ID.';
+  if (message) return message;
+  return "Couldn't save the activation.";
+}
+
 export async function createLicense(input: {
   name: string;
   installId: string;
@@ -184,6 +196,7 @@ export async function createLicense(input: {
   notes?: string | null;
   phone?: string | null;
 }): Promise<LicenseRow> {
+  if (!isVendorUnlocked()) throw new Error('Only Super Admin can activate a company.');
   const name = input.name.trim();
   const installId = input.installId.trim().toUpperCase();
   if (!name) throw new Error('Name is required');
@@ -191,27 +204,55 @@ export async function createLicense(input: {
   if (!['monthly', 'yearly', 'forever'].includes(input.plan)) {
     throw new Error('Invalid plan');
   }
+  const ownId = getDeviceLicense()?.installId?.trim().toUpperCase() || '';
+  if (ownId && ownId === installId) throw new Error('Enter the customer Install ID.');
   const activatedAt = todayIsoDate();
   let expiresAt: string | null = null;
   if (input.plan === 'monthly') expiresAt = addMonthsIso(activatedAt, 1);
   if (input.plan === 'yearly') expiresAt = addMonthsIso(activatedAt, 12);
-  const now = new Date().toISOString();
-  const row: Omit<LicenseRow, 'activationCode'> = {
-    id: newId(),
-    name,
-    installId,
-    plan: input.plan,
-    activatedAt,
-    expiresAt,
-    notes: input.notes?.trim() || null,
-    phone: input.phone?.trim() || null,
-    tenantId: resolveTenantForInstall(installId),
-    createdAt: now,
+  const client = getSupabase();
+  if (!client) throw new Error("Couldn't reach the cloud.");
+  const proposedId = newId();
+  const { data, error } = await client.rpc('activate_vendor_license', {
+    p_id: proposedId,
+    p_name: name,
+    p_install_id: installId,
+    p_plan: input.plan,
+    p_activated_at: activatedAt,
+    p_expires_at: expiresAt,
+    p_notes: input.notes?.trim() || null,
+    p_phone: input.phone?.trim() || null,
+    p_tenant_id: resolveTenantForInstall(installId),
+  });
+  if (error) throw new Error(describeLicenseSaveError(error));
+  if (!data || typeof data !== 'object') throw new Error("Couldn't save the activation.");
+  const saved = data as {
+    id?: string;
+    name?: string;
+    install_id?: string;
+    plan?: LicensePlan;
+    activated_at?: string;
+    expires_at?: string | null;
+    notes?: string | null;
+    phone?: string | null;
+    tenant_id?: string;
+    created_at?: string;
   };
-  store.licenses.unshift(row);
+  const row: Omit<LicenseRow, 'activationCode'> = {
+    id: saved.id?.trim() || proposedId,
+    name: saved.name?.trim() || name,
+    installId: saved.install_id?.trim().toUpperCase() || installId,
+    plan: saved.plan === 'monthly' || saved.plan === 'yearly' || saved.plan === 'forever' ? saved.plan : input.plan,
+    activatedAt: saved.activated_at?.trim() || activatedAt,
+    expiresAt: saved.plan === 'forever' ? null : saved.expires_at?.trim() || expiresAt,
+    notes: saved.notes?.trim() || null,
+    phone: saved.phone?.trim() || null,
+    tenantId: saved.tenant_id?.trim() || null,
+    createdAt: saved.created_at?.trim() || new Date().toISOString(),
+  };
+  store.licenses = [row, ...store.licenses.filter((item) => item.installId !== row.installId && item.id !== row.id)];
   await persist();
   emit();
-  void pushLicense(row);
   return { ...row, activationCode: await buildActivationCode(row) };
 }
 
@@ -247,20 +288,20 @@ async function pullCloud(): Promise<void> {
     }
     const { data: licenses } = await client
       .from('licenses')
-      .select('id, name, install_id, plan, activated_at, expires_at, notes, phone, created_at')
+      .select('id, name, install_id, plan, activated_at, expires_at, notes, phone, tenant_id, created_at')
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
     if (licenses?.length) {
       store.licenses = licenses.map((row) => ({
         id: String(row.id),
         name: String(row.name),
-        installId: String(row.install_id),
+        installId: String(row.install_id).trim().toUpperCase(),
         plan: row.plan as LicensePlan,
         activatedAt: String(row.activated_at),
         expiresAt: row.expires_at ? String(row.expires_at) : null,
         notes: row.notes ? String(row.notes) : null,
         phone: row.phone ? String(row.phone) : null,
-        tenantId: null,
+        tenantId: row.tenant_id ? String(row.tenant_id) : null,
         createdAt: String(row.created_at),
       }));
     }
@@ -287,18 +328,3 @@ async function pushCompany(row: ClientCompany): Promise<void> {
   });
 }
 
-async function pushLicense(row: Omit<LicenseRow, 'activationCode'>): Promise<void> {
-  const client = getSupabase();
-  if (!client) return;
-  await client.from('licenses').upsert({
-    id: row.id,
-    name: row.name,
-    install_id: row.installId,
-    plan: row.plan,
-    activated_at: row.activatedAt,
-    expires_at: row.expiresAt,
-    notes: row.notes,
-    phone: row.phone,
-    deleted_at: null,
-  });
-}

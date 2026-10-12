@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 
+import { productFlagColumnsReady, shopSendsItemBatches, shopSendsProductFlags } from '@/lib/cloudSchema';
 import { getAppConfig, getMemberTenantId } from '@/lib/config';
 import {
   applyCloudSnapshot,
@@ -9,6 +10,8 @@ import {
   type Account,
   type AccountType,
   type AmountType,
+  type CropPurchase,
+  type CropSale,
   type Named,
   type Party,
   type PaymentMode,
@@ -16,6 +19,7 @@ import {
   type PurchaseDoc,
   type ReturnDoc,
   type SaleDoc,
+  type StockBatch,
   type Voucher,
   type VoucherType,
 } from '@/lib/erp';
@@ -191,6 +195,20 @@ async function pushTombstones() {
   await dropTombstones(done);
 }
 
+async function fetchOptional<T>(table: string): Promise<T[] | null> {
+  try {
+    return await fetchTable<T>(table);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/could not find the table|does not exist|schema cache/i.test(message)) return null;
+    throw err;
+  }
+}
+
+function flag(value: unknown) {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
 function namedFrom(
   rows: {
     id: string;
@@ -352,6 +370,8 @@ export async function pullShopFromCloud() {
     taxId: row.tax_id ? text(row.tax_id) : null,
     reorderLevel: n(row.reorder_level, 5),
     isActive: row.is_active !== false,
+    isCrop: flag(row.is_crop),
+    trackBatch: flag(row.is_crop) ? false : flag(row.track_batch),
     updatedAt: text(row.updated_at) || undefined,
     variants: variantsByProduct.get(text(row.id)) ?? [],
   }));
@@ -405,6 +425,8 @@ export async function pullShopFromCloud() {
       quantity: n(row.quantity),
       unitPrice: n(row.unit_price),
       lineTotal: n(row.line_total),
+      batchNo: text(row.batch_no),
+      expiryDate: text(row.expiry_date),
     });
     saleLines.set(saleId, list);
   }
@@ -445,6 +467,8 @@ export async function pullShopFromCloud() {
       quantity: n(row.quantity),
       unitPrice: n(row.unit_cost ?? row.unit_price),
       lineTotal: n(row.line_total),
+      batchNo: text(row.batch_no),
+      expiryDate: text(row.expiry_date),
     });
     purchaseLines.set(purchaseId, list);
   }
@@ -566,6 +590,94 @@ export async function pullShopFromCloud() {
   const remoteSales = mappedSales.filter((row) => !row.deletedAt && !isTombstoned('sales', row.id));
   const remotePurchases = mappedPurchases.filter((row) => !row.deletedAt && !isTombstoned('purchases', row.id));
 
+  const [batchRows, cropPurchaseRows, cropVehicleRows, cropSaleRows] = await Promise.all([
+    fetchOptional<Record<string, unknown>>('stock_batches'),
+    fetchOptional<Record<string, unknown>>('crop_purchases'),
+    fetchOptional<Record<string, unknown>>('crop_purchase_vehicles'),
+    fetchOptional<Record<string, unknown>>('crop_sales'),
+  ]);
+  const mappedBatches: StockBatch[] | undefined = batchRows
+    ? batchRows.map((row) => ({
+        id: text(row.id),
+        variantId: text(row.variant_id),
+        batchNo: text(row.batch_no),
+        expiryDate: text(row.expiry_date),
+        qty: n(row.qty),
+        updatedAt: text(row.updated_at) || undefined,
+      }))
+    : undefined;
+  const vehiclesByPurchase = new Map<string, CropPurchase['vehicles']>();
+  for (const row of cropVehicleRows ?? []) {
+    const purchaseId = text(row.crop_purchase_id);
+    const list = vehiclesByPurchase.get(purchaseId) ?? [];
+    list.push({
+      id: text(row.id),
+      vehicleNo: text(row.vehicle_no),
+      bags: n(row.bags),
+      totalWeight: n(row.total_weight),
+      kaat: n(row.kaat),
+      safiWeight: n(row.safi_weight),
+      rate: n(row.rate),
+      amount: n(row.amount),
+      lineOrder: n(row.line_order),
+    });
+    vehiclesByPurchase.set(purchaseId, list);
+  }
+  const mappedCropPurchases: CropPurchase[] | undefined = cropPurchaseRows
+    ? cropPurchaseRows.map((row) => {
+        const partyType = text(row.party_type) === 'vendor' ? 'vendor' : 'customer';
+        const partyId = text(row.party_id);
+        return {
+          id: text(row.id),
+          voucherId: text(row.voucher_id),
+          docNo: text(row.doc_no),
+          docDate: text(row.doc_date),
+          partyType,
+          partyId,
+          partyName: (partyType === 'customer' ? customersById.get(partyId) : vendorsById.get(partyId)) || '',
+          variantId: text(row.variant_id),
+          productName: text(row.product_name),
+          safiWeight: n(row.safi_weight),
+          grossAmount: n(row.gross_amount),
+          commission: n(row.commission),
+          brokerage: n(row.brokerage),
+          mazdoori: n(row.mazdoori),
+          fees: n(row.fees),
+          bardana: n(row.bardana),
+          deductionAmount: n(row.deduction_amount),
+          netPayable: n(row.net_payable),
+          paidAmount: n(row.paid_amount),
+          cashPaid: 0,
+          bankPaid: 0,
+          remarks: text(row.remarks),
+          status: 'completed',
+          vehicles: (vehiclesByPurchase.get(text(row.id)) ?? []).sort((a, b) => (a.lineOrder ?? 0) - (b.lineOrder ?? 0)),
+          updatedAt: text(row.updated_at) || undefined,
+        };
+      })
+    : undefined;
+  const mappedCropSales: CropSale[] | undefined = cropSaleRows
+    ? cropSaleRows.map((row) => ({
+        id: text(row.id),
+        voucherId: text(row.voucher_id),
+        docNo: text(row.doc_no),
+        docDate: text(row.doc_date),
+        customerId: text(row.customer_id),
+        customerName: customersById.get(text(row.customer_id)) || '',
+        variantId: text(row.variant_id),
+        productName: text(row.product_name),
+        weight: n(row.weight),
+        rate: n(row.rate),
+        amount: n(row.amount),
+        paidAmount: n(row.paid_amount),
+        cashPaid: 0,
+        bankPaid: 0,
+        remarks: text(row.remarks),
+        status: 'completed',
+        updatedAt: text(row.updated_at) || undefined,
+      }))
+    : undefined;
+
   await applyCloudSnapshot({
     settings: settingsPatch,
     settingIds,
@@ -580,6 +692,9 @@ export async function pullShopFromCloud() {
     accounts: mappedAccounts,
     sales: remoteSales,
     purchases: remotePurchases,
+    batches: mappedBatches,
+    cropPurchases: mappedCropPurchases,
+    cropSales: mappedCropSales,
     saleReturns: mappedSaleReturns,
     purchaseReturns: mappedPurchaseReturns,
     vouchers: mappedVouchers,
@@ -643,6 +758,8 @@ export async function pushShopToCloud() {
   try {
     const { tenantId } = requireCloud();
     const shop = getShopSnapshot();
+    const sendFlags = shopSendsProductFlags(shop) || (await productFlagColumnsReady());
+    const sendItemBatches = shopSendsItemBatches(shop);
     const now = stamp();
     const settingsKeys: (keyof typeof shop.settings)[] = [
       'shop_name',
@@ -762,6 +879,7 @@ export async function pushShopToCloud() {
         created_at: now,
         updated_at: row.updatedAt || now,
         deleted_at: null,
+        ...(sendFlags ? { track_batch: Boolean(row.trackBatch), is_crop: Boolean(row.isCrop) } : {}),
       })),
       'sku',
     );
@@ -799,7 +917,16 @@ export async function pushShopToCloud() {
         voucher_no: row.voucherNo,
         voucher_type: row.voucherType,
         voucher_date: row.voucherDate,
-        party_type: row.voucherType === 'receipt' || row.voucherType === 'sale' || row.voucherType === 'sale_return' ? 'customer' : row.partyId ? 'vendor' : null,
+        party_type:
+          row.voucherType === 'receipt' ||
+          row.voucherType === 'sale' ||
+          row.voucherType === 'sale_return' ||
+          row.voucherType === 'crop_sale' ||
+          row.voucherType === 'crop_purchase'
+            ? 'customer'
+            : row.partyId
+              ? 'vendor'
+              : null,
         party_id: cloudRef(row.partyId, customerIds, vendorIds),
         account_id: row.accountId && localAccountIds.has(row.accountId) ? cloudRef(row.accountId, accountIds) : null,
         reference_no: row.referenceNo || null,
@@ -888,6 +1015,7 @@ export async function pushShopToCloud() {
           created_at: now,
           updated_at: now,
           deleted_at: null,
+          ...(sendItemBatches ? { batch_no: line.batchNo || null, expiry_date: line.expiryDate || null } : {}),
         })),
       ),
     );
@@ -940,6 +1068,7 @@ export async function pushShopToCloud() {
           created_at: now,
           updated_at: now,
           deleted_at: null,
+          ...(sendItemBatches ? { batch_no: line.batchNo || null, expiry_date: line.expiryDate || null } : {}),
         })),
       ),
     );
@@ -1053,6 +1182,97 @@ export async function pushShopToCloud() {
       })),
     );
 
+    if (sendItemBatches && shop.batches.length) {
+      await upsertTable(
+        'stock_batches',
+        shop.batches.map((row) => ({
+          id: row.id,
+          tenant_id: tenantId,
+          variant_id: cloudRef(row.variantId, variantIds),
+          batch_no: row.batchNo,
+          expiry_date: row.expiryDate || null,
+          qty: row.qty,
+          created_at: row.updatedAt || now,
+          updated_at: row.updatedAt || now,
+          deleted_at: null,
+        })),
+      );
+    }
+    if (shop.cropPurchases.length) {
+      await upsertTable(
+        'crop_purchases',
+        shop.cropPurchases.map((row) => ({
+          id: row.id,
+          tenant_id: tenantId,
+          voucher_id: cloudRef(row.voucherId, voucherIdMap),
+          doc_no: row.docNo,
+          doc_date: row.docDate,
+          party_type: row.partyType,
+          party_id: cloudRef(row.partyId, customerIds, vendorIds),
+          variant_id: cloudRef(row.variantId, variantIds),
+          product_name: row.productName,
+          safi_weight: row.safiWeight,
+          gross_amount: row.grossAmount,
+          commission: row.commission,
+          brokerage: row.brokerage,
+          mazdoori: row.mazdoori,
+          fees: row.fees,
+          bardana: row.bardana,
+          deduction_amount: row.deductionAmount,
+          net_payable: row.netPayable,
+          paid_amount: row.paidAmount,
+          remarks: row.remarks || null,
+          status: row.status,
+          created_at: row.updatedAt || now,
+          updated_at: row.updatedAt || now,
+          deleted_at: null,
+        })),
+      );
+      await upsertTable(
+        'crop_purchase_vehicles',
+        shop.cropPurchases.flatMap((row) =>
+          row.vehicles.map((vehicle, index) => ({
+            id: vehicle.id,
+            tenant_id: tenantId,
+            crop_purchase_id: row.id,
+            vehicle_no: vehicle.vehicleNo,
+            bags: vehicle.bags,
+            total_weight: vehicle.totalWeight,
+            kaat: vehicle.kaat,
+            safi_weight: vehicle.safiWeight,
+            rate: vehicle.rate,
+            amount: vehicle.amount,
+            line_order: index,
+            deleted_at: null,
+          })),
+        ),
+      );
+    }
+    if (shop.cropSales.length) {
+      await upsertTable(
+        'crop_sales',
+        shop.cropSales.map((row) => ({
+          id: row.id,
+          tenant_id: tenantId,
+          voucher_id: cloudRef(row.voucherId, voucherIdMap),
+          doc_no: row.docNo,
+          doc_date: row.docDate,
+          customer_id: cloudRef(row.customerId, customerIds),
+          variant_id: cloudRef(row.variantId, variantIds),
+          product_name: row.productName,
+          weight: row.weight,
+          rate: row.rate,
+          amount: row.amount,
+          paid_amount: row.paidAmount,
+          remarks: row.remarks || null,
+          status: row.status,
+          created_at: row.updatedAt || now,
+          updated_at: row.updatedAt || now,
+          deleted_at: null,
+        })),
+      );
+    }
+
     const movements = [
       ...liveSales.flatMap((sale) =>
         sale.items.map((line) => ({
@@ -1086,6 +1306,34 @@ export async function pushShopToCloud() {
           deleted_at: null,
         })),
       ),
+      ...shop.cropPurchases.map((row) => ({
+        id: `${row.id}:crop-in`,
+        tenant_id: tenantId,
+        variant_id: cloudRef(row.variantId, variantIds),
+        movement_type: 'purchase',
+        quantity: row.safiWeight,
+        reference_type: 'crop_purchase',
+        reference_id: row.id,
+        notes: row.docNo,
+        created_by: null,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+      })),
+      ...shop.cropSales.map((row) => ({
+        id: `${row.id}:crop-out`,
+        tenant_id: tenantId,
+        variant_id: cloudRef(row.variantId, variantIds),
+        movement_type: 'sale',
+        quantity: row.weight,
+        reference_type: 'crop_sale',
+        reference_id: row.id,
+        notes: row.docNo,
+        created_by: null,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+      })),
     ];
     await upsertTable('stock_movements', movements);
     markRefreshSuccess({
