@@ -1,6 +1,8 @@
 import {
   getSettings,
   money,
+  type CropPurchase,
+  type CropSale,
   type PurchaseDoc,
   type ReturnDoc,
   type SaleDoc,
@@ -275,6 +277,111 @@ export async function printHtml(html: string, title: string) {
   } catch (err) {
     showShareError(err);
   }
+}
+
+function cropChargeTotals(doc: CropPurchase) {
+  const left = moneyRoundSafe(doc.netPayable - doc.paidAmount);
+  return `<div><span>Vehicle total</span><span>${moneyBits(doc.grossAmount)}</span></div>
+    <div><span>Commission</span><span>${moneyBits(doc.commission)}</span></div>
+    <div><span>Brokerage</span><span>${moneyBits(doc.brokerage)}</span></div>
+    <div><span>Mazdoori</span><span>${moneyBits(doc.mazdoori)}</span></div>
+    <div><span>Fees</span><span>${moneyBits(doc.fees)}</span></div>
+    <div><span>Bardana</span><span>${moneyBits(doc.bardana)}</span></div>
+    <div class="grand"><span>Net payable</span><span>${moneyBits(doc.netPayable)}</span></div>
+    ${doc.cashPaid > 0 ? `<div><span>Cash</span><span>${moneyBits(doc.cashPaid)}</span></div>` : ''}
+    ${doc.bankPaid > 0 ? `<div><span>Bank</span><span>${moneyBits(doc.bankPaid)}</span></div>` : ''}
+    <div><span>Paid</span><span>${moneyBits(doc.paidAmount)}</span></div>
+    <div><span>Left on khata</span><span>${moneyBits(left)}</span></div>`;
+}
+
+export function cropPurchasePrintHtml(doc: CropPurchase, size: ReceiptSize = 'a4') {
+  const s = shop();
+  const partyLabel = doc.partyType === 'customer' ? 'Farmer' : 'Supplier';
+  const rows = doc.vehicles
+    .map(
+      (vehicle) => `<tr>
+      <td>${esc(vehicle.vehicleNo)}</td>
+      <td class="num">${vehicle.bags}</td>
+      <td class="num">${vehicle.totalWeight}</td>
+      <td class="num">${vehicle.kaat}</td>
+      <td class="num">${vehicle.safiWeight}</td>
+      <td class="num">${vehicle.rate.toFixed(2)}</td>
+      <td class="num">${vehicle.amount.toFixed(2)}</td>
+    </tr>`,
+    )
+    .join('');
+  const totals = cropChargeTotals(doc);
+  const note = doc.remarks || s.footer;
+  if (size === 'thermal') {
+    return wrap(
+      doc.docNo,
+      size,
+      `${shopHead(size)}<div class="badge">Crop purchase</div>
+      <div class="meta">
+        <div><span>Slip</span><strong>${esc(doc.docNo)}</strong></div>
+        <div><span>Date</span><span>${esc(doc.docDate)}</span></div>
+        <div><span>${partyLabel}</span><span>${esc(doc.partyName || '-')}</span></div>
+        <div><span>Crop</span><span>${esc(doc.productName)}</span></div>
+        <div><span>Safi</span><span>${doc.safiWeight}</span></div>
+      </div>
+      <table><thead><tr><th>Vehicle</th><th class="num">Bags</th><th class="num">Total</th><th class="num">Kaat</th><th class="num">Safi</th><th class="num">Rate</th><th class="num">Amt</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="totals">${totals}</div>
+      <div class="footer">${esc(note)}</div>`,
+    );
+  }
+  return wrap(
+    doc.docNo,
+    size,
+    `<div class="sheet"><div class="header">${shopHead(size)}<div class="doc-title"><div class="label">Crop purchase</div><div class="no">${esc(doc.docNo)}</div></div></div>
+      <div class="meta-grid">
+        <div><div class="k">Date</div><div>${esc(doc.docDate)}</div></div>
+        <div><div class="k">${partyLabel}</div><div>${esc(doc.partyName || '-')}</div></div>
+        <div><div class="k">Crop</div><div>${esc(doc.productName)}</div></div>
+        <div><div class="k">Safi weight</div><div>${doc.safiWeight}</div></div>
+      </div>
+      <table><thead><tr><th>Vehicle</th><th class="num">Bags</th><th class="num">Total weight</th><th class="num">Kaat</th><th class="num">Safi</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="totals-wrap"><div class="totals">${totals}</div></div>
+      <div class="footer">${esc(note)}</div></div>`,
+  );
+}
+
+export function cropSalePrintHtml(doc: CropSale, size: ReceiptSize = 'thermal') {
+  const s = shop();
+  const left = moneyRoundSafe(doc.amount - doc.paidAmount);
+  const totals = `<div class="grand"><span>Amount</span><span>${moneyBits(doc.amount)}</span></div>
+    ${doc.cashPaid > 0 ? `<div><span>Cash</span><span>${moneyBits(doc.cashPaid)}</span></div>` : ''}
+    ${doc.bankPaid > 0 ? `<div><span>Bank</span><span>${moneyBits(doc.bankPaid)}</span></div>` : ''}
+    <div><span>Paid</span><span>${moneyBits(doc.paidAmount)}</span></div>
+    <div><span>Left on khata</span><span>${moneyBits(left)}</span></div>`;
+  const row = `<tr><td>${esc(doc.productName)}</td><td class="num">${doc.weight}</td><td class="num">${doc.rate.toFixed(2)}</td><td class="num">${doc.amount.toFixed(2)}</td></tr>`;
+  const note = doc.remarks || s.footer;
+  if (size === 'thermal') {
+    return wrap(
+      doc.docNo,
+      size,
+      `${shopHead(size)}<div class="badge">Crop sale</div>
+      <div class="meta">
+        <div><span>Slip</span><strong>${esc(doc.docNo)}</strong></div>
+        <div><span>Date</span><span>${esc(doc.docDate)}</span></div>
+        <div><span>Buyer</span><span>${esc(doc.customerName || '-')}</span></div>
+      </div>
+      <table><thead><tr><th>Crop</th><th class="num">Weight</th><th class="num">Rate</th><th class="num">Amt</th></tr></thead><tbody>${row}</tbody></table>
+      <div class="totals">${totals}</div>
+      <div class="footer">${esc(note)}</div>`,
+    );
+  }
+  return wrap(
+    doc.docNo,
+    size,
+    `<div class="sheet"><div class="header">${shopHead(size)}<div class="doc-title"><div class="label">Crop sale</div><div class="no">${esc(doc.docNo)}</div></div></div>
+      <div class="meta-grid">
+        <div><div class="k">Date</div><div>${esc(doc.docDate)}</div></div>
+        <div><div class="k">Buyer</div><div>${esc(doc.customerName || '-')}</div></div>
+      </div>
+      <table><thead><tr><th>Crop</th><th class="num">Weight</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead><tbody>${row}</tbody></table>
+      <div class="totals-wrap"><div class="totals">${totals}</div></div>
+      <div class="footer">${esc(note)}</div></div>`,
+  );
 }
 
 export function saleReceiptText(sale: SaleDoc) {

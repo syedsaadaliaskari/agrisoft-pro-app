@@ -9,6 +9,7 @@ import { SettlementPad } from '@/components/SettlementPad';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { createCropPurchase, cropProducts, listCustomers, listVendors, money, subscribeErp } from '@/lib/erp';
+import { cropPurchasePrintHtml, printHtml } from '@/lib/print';
 import { newId } from '@/lib/id';
 import { moneyRound } from '@/lib/settlement';
 
@@ -64,10 +65,10 @@ export function CropBuyScreen({ partyType }: { partyType: 'customer' | 'vendor' 
     return { lines, gross, net: moneyRound(gross - charges) };
   }, [vehicles, commission, brokerage, mazdoori, fees, bardana]);
 
-  const save = async () => {
+  const save = async (andShare: boolean) => {
     setError(null);
     try {
-      await createCropPurchase({
+      const doc = await createCropPurchase({
         docDate: date,
         partyType,
         partyId,
@@ -88,6 +89,7 @@ export function CropBuyScreen({ partyType }: { partyType: 'customer' | 'vendor' 
         bankPaid: Number(bankPaid || 0),
         remarks,
       });
+      if (andShare) await printHtml(cropPurchasePrintHtml(doc, 'thermal'), doc.docNo);
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save.");
@@ -175,7 +177,8 @@ export function CropBuyScreen({ partyType }: { partyType: 'customer' | 'vendor' 
             />
             <Field label="Remarks" value={remarks} onChangeText={setRemarks} multiline />
             {error ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{error}</Text> : null}
-            <PrimaryButton label="Save" color={colors.tint} onPress={() => void save()} />
+            <PrimaryButton label="Save" color={colors.tint} onPress={() => void save(false)} />
+            <PrimaryButton label="Save & share" tone="secondary" color={colors.tint} onPress={() => void save(true)} />
           </Card>
         )}
         {pick === 'party' ? (

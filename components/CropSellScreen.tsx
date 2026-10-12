@@ -9,6 +9,7 @@ import { SettlementPad } from '@/components/SettlementPad';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { createCropSale, cropProducts, listCustomers, money, subscribeErp } from '@/lib/erp';
+import { cropSalePrintHtml, printHtml } from '@/lib/print';
 import { moneyRound } from '@/lib/settlement';
 
 function today() {
@@ -36,10 +37,10 @@ export function CropSellScreen() {
   const selected = crops.find((row) => row.variantId === variantId);
   const amount = useMemo(() => moneyRound((Number(weight) || 0) * (Number(rate) || 0)), [weight, rate]);
 
-  const save = async () => {
+  const save = async (andShare: boolean) => {
     setError(null);
     try {
-      await createCropSale({
+      const doc = await createCropSale({
         docDate: date,
         customerId,
         variantId,
@@ -49,6 +50,7 @@ export function CropSellScreen() {
         bankPaid: Number(bankPaid || 0),
         remarks,
       });
+      if (andShare) await printHtml(cropSalePrintHtml(doc, 'thermal'), doc.docNo);
       router.back();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save.");
@@ -87,7 +89,8 @@ export function CropSellScreen() {
             />
             <Field label="Remarks" value={remarks} onChangeText={setRemarks} multiline />
             {error ? <Text style={{ color: colors.danger, fontWeight: '700' }}>{error}</Text> : null}
-            <PrimaryButton label="Save" color={colors.tint} onPress={() => void save()} />
+            <PrimaryButton label="Save" color={colors.tint} onPress={() => void save(false)} />
+            <PrimaryButton label="Save & share" tone="secondary" color={colors.tint} onPress={() => void save(true)} />
           </Card>
         )}
         {pick === 'buyer' ? (
