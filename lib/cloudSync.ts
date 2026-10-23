@@ -219,8 +219,10 @@ function namedFrom(
     is_inclusive?: boolean | null;
     type?: string | null;
     value?: number | null;
+    equals_kg?: number | null;
     is_active?: boolean | null;
   }[],
+  keepEquals = false,
 ): Named[] {
   return rows.map((row) => ({
     id: row.id,
@@ -231,8 +233,20 @@ function namedFrom(
     isInclusive: row.is_inclusive ?? undefined,
     type: (row.type as AmountType | undefined) ?? undefined,
     value: row.value ?? undefined,
+    equalsKg:
+      'equals_kg' in row
+        ? row.equals_kg == null || Number(row.equals_kg) <= 0
+          ? null
+          : Number(row.equals_kg)
+        : keepEquals
+          ? storeUnitsEquals(row.id)
+          : undefined,
     isActive: row.is_active !== false,
   }));
+}
+
+function storeUnitsEquals(id: string) {
+  return getShopSnapshot().units.find((unit) => unit.id === id)?.equalsKg ?? null;
 }
 
 function partyFrom(
@@ -468,6 +482,7 @@ export async function pullShopFromCloud() {
       unitPrice: n(row.unit_cost ?? row.unit_price),
       lineTotal: n(row.line_total),
       batchNo: text(row.batch_no),
+      manufacturedDate: text(row.manufactured_date),
       expiryDate: text(row.expiry_date),
     });
     purchaseLines.set(purchaseId, list);
@@ -601,6 +616,7 @@ export async function pullShopFromCloud() {
         id: text(row.id),
         variantId: text(row.variant_id),
         batchNo: text(row.batch_no),
+        manufacturedDate: text(row.manufactured_date),
         expiryDate: text(row.expiry_date),
         qty: n(row.qty),
         updatedAt: text(row.updated_at) || undefined,
@@ -619,6 +635,8 @@ export async function pullShopFromCloud() {
       safiWeight: n(row.safi_weight),
       rate: n(row.rate),
       amount: n(row.amount),
+      stockFactor: 'stock_factor' in row ? n(row.stock_factor) || 1 : 1,
+      weighUnit: 'weigh_unit' in row ? text(row.weigh_unit) || null : null,
       lineOrder: n(row.line_order),
     });
     vehiclesByPurchase.set(purchaseId, list);
@@ -669,11 +687,21 @@ export async function pullShopFromCloud() {
         weight: n(row.weight),
         rate: n(row.rate),
         amount: n(row.amount),
+        stockFactor: 'stock_factor' in row ? n(row.stock_factor) || 1 : 1,
+        weighUnit: 'weigh_unit' in row ? text(row.weigh_unit) || null : null,
+        commission: n(row.commission),
+        brokerage: n(row.brokerage),
+        mazdoori: n(row.mazdoori),
+        fees: n(row.fees),
+        bardana: n(row.bardana),
+        deductionAmount: n(row.deduction_amount),
+        netAmount: n(row.deduction_amount) > 0 || n(row.net_amount) > 0 ? n(row.net_amount) : n(row.amount),
+        costAmount: n(row.cost_amount),
         paidAmount: n(row.paid_amount),
         cashPaid: 0,
         bankPaid: 0,
         remarks: text(row.remarks),
-        status: 'completed',
+        status: text(row.status) === 'deleted' ? 'deleted' : 'completed',
         updatedAt: text(row.updated_at) || undefined,
       }))
     : undefined;
@@ -681,7 +709,7 @@ export async function pullShopFromCloud() {
   await applyCloudSnapshot({
     settings: settingsPatch,
     settingIds,
-    units: namedFrom(units),
+    units: namedFrom(units, true),
     categories: namedFrom(categories),
     taxes: namedFrom(taxes),
     discounts: namedFrom(discounts),
@@ -738,6 +766,7 @@ function namedPayload(
     type: table === 'discounts' || table === 'additions' ? row.type || 'percent' : undefined,
     value: table === 'discounts' || table === 'additions' ? row.value ?? 0 : undefined,
     is_active: row.isActive,
+    equals_kg: table === 'units' ? row.equalsKg ?? null : undefined,
     created_at: now,
     updated_at: now,
     deleted_at: null,
@@ -786,7 +815,18 @@ export async function pushShopToCloud() {
     });
 
     await saveRowsByNaturalKey('settings', 'key', settings);
-    const unitIds = await upsertTable('units', namedPayload('units', shop.units.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
+    const equalsProbe = await getSupabase()?.from('units').select('equals_kg').eq('tenant_id', tenantId).limit(0);
+    const sendEquals = Boolean(equalsProbe && !equalsProbe.error);
+    const unitIds = await upsertTable(
+      'units',
+      namedPayload('units', shop.units.filter((row) => row.isActive), tenantId, now)
+        .map(stripUndef)
+        .map((row) => {
+          if (!sendEquals) delete row.equals_kg;
+          return row;
+        }),
+      'name',
+    );
     const categoryIds = await upsertTable('categories', namedPayload('categories', shop.categories.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
     const taxIds = await upsertTable('taxes', namedPayload('taxes', shop.taxes.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
     await upsertTable('discounts', namedPayload('discounts', shop.discounts.filter((row) => row.isActive), tenantId, now).map(stripUndef), 'name');
@@ -1068,7 +1108,13 @@ export async function pushShopToCloud() {
           created_at: now,
           updated_at: now,
           deleted_at: null,
-          ...(sendItemBatches ? { batch_no: line.batchNo || null, expiry_date: line.expiryDate || null } : {}),
+          ...(sendItemBatches
+            ? {
+                batch_no: line.batchNo || null,
+                manufactured_date: line.manufacturedDate || null,
+                expiry_date: line.expiryDate || null,
+              }
+            : {}),
         })),
       ),
     );
@@ -1190,6 +1236,7 @@ export async function pushShopToCloud() {
           tenant_id: tenantId,
           variant_id: cloudRef(row.variantId, variantIds),
           batch_no: row.batchNo,
+          manufactured_date: row.manufacturedDate || null,
           expiry_date: row.expiryDate || null,
           qty: row.qty,
           created_at: row.updatedAt || now,
@@ -1225,12 +1272,18 @@ export async function pushShopToCloud() {
           status: row.status,
           created_at: row.updatedAt || now,
           updated_at: row.updatedAt || now,
-          deleted_at: null,
+          deleted_at: row.status === 'deleted' ? row.updatedAt || now : null,
         })),
       );
+      const vehicleFactorProbe = await getSupabase()
+        ?.from('crop_purchase_vehicles')
+        .select('stock_factor')
+        .eq('tenant_id', tenantId)
+        .limit(0);
+      const sendVehicleFactor = Boolean(vehicleFactorProbe && !vehicleFactorProbe.error);
       await upsertTable(
         'crop_purchase_vehicles',
-        shop.cropPurchases.flatMap((row) =>
+        shop.cropPurchases.filter((row) => row.status !== 'deleted').flatMap((row) =>
           row.vehicles.map((vehicle, index) => ({
             id: vehicle.id,
             tenant_id: tenantId,
@@ -1244,11 +1297,20 @@ export async function pushShopToCloud() {
             amount: vehicle.amount,
             line_order: index,
             deleted_at: null,
+            ...(sendVehicleFactor ? { stock_factor: vehicle.stockFactor ?? 1, weigh_unit: vehicle.weighUnit ?? null } : {}),
           })),
         ),
       );
     }
     if (shop.cropSales.length) {
+      const chargeProbe = await getSupabase()
+        ?.from('crop_sales')
+        .select('mazdoori,net_amount,cost_amount')
+        .eq('tenant_id', tenantId)
+        .limit(0);
+      const sendSaleCharges = Boolean(chargeProbe && !chargeProbe.error);
+      const saleFactorProbe = await getSupabase()?.from('crop_sales').select('stock_factor').eq('tenant_id', tenantId).limit(0);
+      const sendSaleFactor = Boolean(saleFactorProbe && !saleFactorProbe.error);
       await upsertTable(
         'crop_sales',
         shop.cropSales.map((row) => ({
@@ -1268,7 +1330,20 @@ export async function pushShopToCloud() {
           status: row.status,
           created_at: row.updatedAt || now,
           updated_at: row.updatedAt || now,
-          deleted_at: null,
+          deleted_at: row.status === 'deleted' ? row.updatedAt || now : null,
+          ...(sendSaleFactor ? { stock_factor: row.stockFactor ?? 1, weigh_unit: row.weighUnit ?? null } : {}),
+          ...(sendSaleCharges
+            ? {
+                commission: row.commission || 0,
+                brokerage: row.brokerage || 0,
+                mazdoori: row.mazdoori || 0,
+                fees: row.fees || 0,
+                bardana: row.bardana || 0,
+                deduction_amount: row.deductionAmount || 0,
+                net_amount: row.netAmount || row.amount,
+                cost_amount: row.costAmount || 0,
+              }
+            : {}),
         })),
       );
     }

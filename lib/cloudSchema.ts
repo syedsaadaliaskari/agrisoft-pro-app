@@ -85,11 +85,13 @@ export async function productFlagColumnsReady() {
 
 export const PRODUCT_FLAG_COLUMNS = ['track_batch', 'is_crop'];
 export const ITEM_BATCH_COLUMNS = ['batch_no', 'expiry_date'];
+export const PURCHASE_ITEM_BATCH_COLUMNS = ['batch_no', 'manufactured_date', 'expiry_date'];
 export const STOCK_BATCH_COLUMNS = [
   'id',
   'tenant_id',
   'variant_id',
   'batch_no',
+  'manufactured_date',
   'expiry_date',
   'qty',
   'created_at',

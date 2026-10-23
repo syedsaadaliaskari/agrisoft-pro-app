@@ -347,8 +347,21 @@ export function cropPurchasePrintHtml(doc: CropPurchase, size: ReceiptSize = 'a4
 
 export function cropSalePrintHtml(doc: CropSale, size: ReceiptSize = 'thermal') {
   const s = shop();
-  const left = moneyRoundSafe(doc.amount - doc.paidAmount);
-  const totals = `<div class="grand"><span>Amount</span><span>${moneyBits(doc.amount)}</span></div>
+  const net = doc.netAmount || doc.amount;
+  const left = moneyRoundSafe(net - doc.paidAmount);
+  const chargeRows = [
+    ['Commission', doc.commission],
+    ['Brokerage', doc.brokerage],
+    ['Mazdoori', doc.mazdoori],
+    ['Fees', doc.fees],
+    ['Bardana', doc.bardana],
+  ]
+    .filter(([, value]) => Number(value) > 0)
+    .map(([label, value]) => `<div><span>${label}</span><span>${moneyBits(Number(value))}</span></div>`)
+    .join('');
+  const totals = `<div><span>Amount</span><span>${moneyBits(doc.amount)}</span></div>
+    ${chargeRows}
+    <div class="grand"><span>Net</span><span>${moneyBits(net)}</span></div>
     ${doc.cashPaid > 0 ? `<div><span>Cash</span><span>${moneyBits(doc.cashPaid)}</span></div>` : ''}
     ${doc.bankPaid > 0 ? `<div><span>Bank</span><span>${moneyBits(doc.bankPaid)}</span></div>` : ''}
     <div><span>Paid</span><span>${moneyBits(doc.paidAmount)}</span></div>

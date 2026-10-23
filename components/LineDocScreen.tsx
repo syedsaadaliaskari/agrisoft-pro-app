@@ -42,6 +42,7 @@ type Cart = {
   unitPrice: number;
   trackBatch: boolean;
   batchNo: string;
+  manufacturedDate: string;
   expiryDate: string;
   batchQty: number | null;
   batches: { batchNo: string; expiryDate: string; qty: number }[];
@@ -96,6 +97,7 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
       unitPrice: line.unitPrice,
       trackBatch: false,
       batchNo: '',
+      manufacturedDate: '',
       expiryDate: '',
       batchQty: null,
       batches: [],
@@ -155,6 +157,7 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
             unitPrice: price,
             trackBatch: true,
             batchNo,
+            manufacturedDate: '',
             expiryDate: first?.expiryDate ?? '',
             batchQty: first ? first.qty : null,
             batches,
@@ -172,6 +175,7 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
             unitPrice: price,
             trackBatch: true,
             batchNo: '',
+            manufacturedDate: '',
             expiryDate: '',
             batchQty: null,
             batches: [],
@@ -190,6 +194,7 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
           unitPrice: price,
           trackBatch: false,
           batchNo: '',
+          manufacturedDate: '',
           expiryDate: '',
           batchQty: null,
           batches: [],
@@ -229,7 +234,7 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
       variantId: l.variantId,
       quantity: l.quantity,
       unitPrice: l.unitPrice,
-      ...(editId ? {} : { batchNo: l.batchNo, expiryDate: l.expiryDate }),
+      ...(editId ? {} : { batchNo: l.batchNo, manufacturedDate: l.manufacturedDate, expiryDate: l.expiryDate }),
     })),
   };
 
@@ -314,7 +319,16 @@ export function LineDocScreen({ kind, editId }: { kind: 'sale' | 'purchase'; edi
                     <Field
                       label="Batch"
                       value={line.batchNo}
+                      placeholder="Leave blank to make one"
                       onChangeText={(value) => setCart((cur) => cur.map((item) => (item.key === line.key ? { ...item, batchNo: value } : item)))}
+                    />
+                    <Field
+                      label="Manufactured"
+                      value={line.manufacturedDate}
+                      placeholder="YYYY-MM-DD"
+                      onChangeText={(value) =>
+                        setCart((cur) => cur.map((item) => (item.key === line.key ? { ...item, manufacturedDate: value } : item)))
+                      }
                     />
                     <Field
                       label="Expiry"

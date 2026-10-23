@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Href, useRouter } from 'expo-router';
 
@@ -10,12 +10,15 @@ import { cardRadius } from '@/constants/layout';
 import { font, moneyText, overline, radius, typeScale } from '@/constants/theme';
 import {
   adjustStock,
+  batchesForProduct,
   inventoryRows,
   listCategories,
   listProducts,
   listUnits,
   money,
+  subscribeErp,
 } from '@/lib/erp';
+import { batchIsAlarming } from '@/lib/expiry';
 import { hasPermission } from '@/lib/permissions';
 import { getSession } from '@/lib/rbac';
 
@@ -139,6 +142,8 @@ export function ProductBooksTable({ query }: { query?: string }) {
   const colors = Colors[scheme];
   const router = useRouter();
   const can = hasPermission(getSession(), 'products.manage');
+  const [, tick] = useState(0);
+  useEffect(() => subscribeErp(() => tick((n) => n + 1)), []);
   const categories = listCategories();
   const units = listUnits();
   const rows = useMemo(() => {
@@ -150,12 +155,13 @@ export function ProductBooksTable({ query }: { query?: string }) {
         unitName: units.find((u) => u.id === product.unitId)?.name ?? '—',
         stock: product.variants.reduce((sum, variant) => sum + variant.stockQty, 0),
         packs: product.variants.length,
+        batches: batchesForProduct(product.id),
       }))
       .filter((row) => {
         if (!q) return true;
         return `${row.name} ${row.categoryName} ${row.unitName}`.toLowerCase().includes(q);
       });
-  }, [query, categories, units]);
+  }, [query, categories, units, tick]);
 
   return (
     <View style={[styles.table, { borderColor: colors.border, backgroundColor: colors.card }]}>
@@ -163,7 +169,7 @@ export function ProductBooksTable({ query }: { query?: string }) {
       <ScrollView horizontal showsHorizontalScrollIndicator>
         <View>
           <View style={styles.row}>
-            <Head text="Name" width={200} />
+            <Head text="Name" width={260} />
             <Head text="Category" width={100} />
             <Head text="Unit" width={80} />
             <Head text="Cost" width={90} />
@@ -178,12 +184,32 @@ export function ProductBooksTable({ query }: { query?: string }) {
               <EmptyState title="No products" />
             </View>
           ) : (
-            rows.map((row) => (
-              <View key={row.id} style={styles.row}>
-                <Cell
-                  text={row.isCrop ? `${row.name} · Crop` : row.trackBatch ? `${row.name} · Batch and expiry` : row.name}
-                  width={200}
-                />
+            rows.map((row) => {
+              const alarming = row.batches.some((batch) => batchIsAlarming(batch.expiryDate));
+              return (
+              <View key={row.id} style={[styles.row, alarming ? { backgroundColor: '#fee2e2' } : null]}>
+                <View style={{ width: 260, borderTopWidth: 1, borderRightWidth: 1, borderColor: colors.border, paddingHorizontal: 10, paddingVertical: 12, gap: 2 }}>
+                  <Text style={{ color: alarming ? '#991b1b' : colors.text, fontWeight: '700' }}>
+                    {alarming ? '⚠ ' : ''}
+                    {row.name}
+                  </Text>
+                  {row.isCrop ? (
+                    <Text style={{ color: '#b45309', fontSize: 12, fontWeight: '700' }}>Crop</Text>
+                  ) : row.batches.length ? (
+                    row.batches.map((batch) => {
+                      const near = batchIsAlarming(batch.expiryDate);
+                      return (
+                        <Text key={batch.id} style={{ color: near ? '#b91c1c' : '#075985', fontSize: 12, fontWeight: near ? '700' : '500' }}>
+                          Batch {batch.batchNo}
+                          {batch.manufacturedDate ? ` · Made ${batch.manufacturedDate}` : ''}
+                          {batch.expiryDate ? ` · Expires ${batch.expiryDate}` : ''}
+                        </Text>
+                      );
+                    })
+                  ) : row.trackBatch ? (
+                    <Text style={{ color: '#075985', fontSize: 12, fontWeight: '700' }}>Batch and expiry</Text>
+                  ) : null}
+                </View>
                 <Cell text={row.categoryName} width={100} />
                 <Cell text={row.unitName} width={80} />
                 <Cell text={money(row.costPrice)} width={90} />
@@ -201,7 +227,8 @@ export function ProductBooksTable({ query }: { query?: string }) {
                   )}
                 </View>
               </View>
-            ))
+              );
+            })
           )}
         </View>
       </ScrollView>

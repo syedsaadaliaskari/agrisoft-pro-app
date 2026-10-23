@@ -6,6 +6,7 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS track_batch boolean NOT NUL
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_crop boolean NOT NULL DEFAULT false;
 
 ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS batch_no text;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS manufactured_date text;
 ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS expiry_date text;
 
 ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS batch_no text;
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS public.stock_batches (
   tenant_id text NOT NULL REFERENCES public.tenants (id),
   variant_id text NOT NULL REFERENCES public.product_variants (id),
   batch_no text NOT NULL,
+  manufactured_date text,
   expiry_date text,
   qty double precision NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -93,6 +95,23 @@ CREATE TABLE IF NOT EXISTS public.crop_sales (
 
 CREATE UNIQUE INDEX IF NOT EXISTS crop_sales_doc_uidx
   ON public.crop_sales (tenant_id, doc_no);
+
+ALTER TABLE public.stock_batches ADD COLUMN IF NOT EXISTS manufactured_date text;
+
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS commission double precision NOT NULL DEFAULT 0;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS brokerage double precision NOT NULL DEFAULT 0;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS mazdoori double precision NOT NULL DEFAULT 0;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS fees double precision NOT NULL DEFAULT 0;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS bardana double precision NOT NULL DEFAULT 0;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS deduction_amount double precision NOT NULL DEFAULT 0;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS net_amount double precision NOT NULL DEFAULT 0;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS cost_amount double precision NOT NULL DEFAULT 0;
+
+ALTER TABLE public.units ADD COLUMN IF NOT EXISTS equals_kg double precision;
+ALTER TABLE public.crop_purchase_vehicles ADD COLUMN IF NOT EXISTS stock_factor double precision NOT NULL DEFAULT 1;
+ALTER TABLE public.crop_purchase_vehicles ADD COLUMN IF NOT EXISTS weigh_unit text;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS stock_factor double precision NOT NULL DEFAULT 1;
+ALTER TABLE public.crop_sales ADD COLUMN IF NOT EXISTS weigh_unit text;
 
 GRANT SELECT, INSERT, UPDATE ON public.stock_batches TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.crop_purchases TO authenticated;

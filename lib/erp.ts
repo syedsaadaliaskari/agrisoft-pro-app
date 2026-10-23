@@ -6,9 +6,11 @@ import {
   CROP_VEHICLE_COLUMNS,
   ITEM_BATCH_COLUMNS,
   PRODUCT_FLAG_COLUMNS,
+  PURCHASE_ITEM_BATCH_COLUMNS,
   STOCK_BATCH_COLUMNS,
   requireCloudColumns,
 } from '@/lib/cloudSchema';
+import { expirySoonCutoff } from '@/lib/expiry';
 import { newId } from '@/lib/id';
 import { moneyRound, resolveMoneySplit, resolveSettlement, type PaymentMode } from '@/lib/settlement';
 import { rememberDeleted } from '@/lib/tombstones';
@@ -51,6 +53,7 @@ export type Named = {
   isInclusive?: boolean;
   type?: AmountType;
   value?: number;
+  equalsKg?: number | null;
   isActive: boolean;
 };
 
@@ -124,6 +127,7 @@ export type DocLine = {
   unitPrice: number;
   lineTotal: number;
   batchNo?: string;
+  manufacturedDate?: string;
   expiryDate?: string;
 };
 
@@ -131,6 +135,7 @@ export type StockBatch = {
   id: string;
   variantId: string;
   batchNo: string;
+  manufacturedDate?: string;
   expiryDate: string;
   qty: number;
   updatedAt?: string;
@@ -145,6 +150,8 @@ export type CropVehicle = {
   safiWeight: number;
   rate: number;
   amount: number;
+  stockFactor?: number;
+  weighUnit?: string | null;
   lineOrder?: number;
 };
 
@@ -171,7 +178,7 @@ export type CropPurchase = {
   cashPaid: number;
   bankPaid: number;
   remarks: string;
-  status: 'completed';
+  status: 'completed' | 'deleted';
   vehicles: CropVehicle[];
   updatedAt?: string;
 };
@@ -188,11 +195,21 @@ export type CropSale = {
   weight: number;
   rate: number;
   amount: number;
+  stockFactor?: number;
+  weighUnit?: string | null;
+  commission?: number;
+  brokerage?: number;
+  mazdoori?: number;
+  fees?: number;
+  bardana?: number;
+  deductionAmount?: number;
+  netAmount?: number;
+  costAmount?: number;
   paidAmount: number;
   cashPaid: number;
   bankPaid: number;
   remarks: string;
-  status: 'completed';
+  status: 'completed' | 'deleted';
   updatedAt?: string;
 };
 
@@ -541,7 +558,15 @@ export function computeDocTotals(
 }
 
 function makeLines(
-  items: { id?: string; variantId: string; quantity: number; unitPrice: number; batchNo?: string; expiryDate?: string }[],
+  items: {
+    id?: string;
+    variantId: string;
+    quantity: number;
+    unitPrice: number;
+    batchNo?: string;
+    manufacturedDate?: string;
+    expiryDate?: string;
+  }[],
 ): DocLine[] {
   return items.map((line) => {
     const found = findVariant(line.variantId);
@@ -556,9 +581,35 @@ function makeLines(
       unitPrice: line.unitPrice,
       lineTotal: line.quantity * line.unitPrice,
       batchNo: line.batchNo?.trim() || '',
+      manufacturedDate: line.manufacturedDate?.trim() || '',
       expiryDate: line.expiryDate?.trim() || '',
     };
   });
+}
+
+function allocateBatchNo() {
+  const nowDate = new Date();
+  const stamp = `${nowDate.getFullYear()}${String(nowDate.getMonth() + 1).padStart(2, '0')}${String(nowDate.getDate()).padStart(2, '0')}`;
+  const prefix = `B-${stamp}-`;
+  const used = new Set(store.batches.map((row) => row.batchNo));
+  let n = 1;
+  while (used.has(`${prefix}${String(n).padStart(3, '0')}`)) n += 1;
+  return `${prefix}${String(n).padStart(3, '0')}`;
+}
+
+function readBatchDates(
+  input: { manufacturedDate?: string | null; expiryDate?: string | null },
+  label: string,
+) {
+  const manufacturedDate = String(input.manufacturedDate ?? '').trim();
+  const expiryDate = String(input.expiryDate ?? '').trim();
+  if (!manufacturedDate) return { error: `${label}: manufactured date is required` };
+  if (!expiryDate) return { error: `${label}: expiry date is required` };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(manufacturedDate) || !/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) {
+    return { error: `${label}: use a real date` };
+  }
+  if (manufacturedDate > expiryDate) return { error: `${label}: manufactured date is after the expiry date` };
+  return { manufacturedDate, expiryDate };
 }
 
 function positiveBatches(variantId: string) {
@@ -567,12 +618,19 @@ function positiveBatches(variantId: string) {
     .sort((a, b) => (a.expiryDate || '9999').localeCompare(b.expiryDate || '9999'));
 }
 
-function receiveBatch(variantId: string, batchNo: string, expiryDate: string, qty: number) {
+function receiveBatch(
+  variantId: string,
+  batchNo: string,
+  expiryDate: string,
+  qty: number,
+  manufacturedDate?: string,
+) {
   const key = batchNo.trim();
   const existing = store.batches.find((row) => row.variantId === variantId && row.batchNo === key);
   if (existing) {
     existing.qty = moneyRound(existing.qty + qty);
     if (expiryDate) existing.expiryDate = expiryDate;
+    if (manufacturedDate) existing.manufacturedDate = manufacturedDate;
     existing.updatedAt = now();
     return;
   }
@@ -580,6 +638,7 @@ function receiveBatch(variantId: string, batchNo: string, expiryDate: string, qt
     id: newId(),
     variantId,
     batchNo: key,
+    manufacturedDate: manufacturedDate || '',
     expiryDate,
     qty: moneyRound(qty),
     updatedAt: now(),
@@ -1089,25 +1148,43 @@ export function inventoryRows() {
 export function batchesForVariant(variantId: string) {
   return positiveBatches(variantId).map((row) => ({
     batchNo: row.batchNo,
+    manufacturedDate: row.manufacturedDate || '',
     expiryDate: row.expiryDate,
     qty: row.qty,
   }));
 }
 
+export function batchesForProduct(productId: string) {
+  const product = store.products.find((row) => row.id === productId);
+  if (!product) return [];
+  const variantIds = new Set(product.variants.map((variant) => variant.id));
+  return store.batches
+    .filter((row) => variantIds.has(row.variantId))
+    .map((row) => ({
+      id: row.id,
+      batchNo: row.batchNo,
+      manufacturedDate: row.manufacturedDate || '',
+      expiryDate: row.expiryDate,
+      qty: row.qty,
+    }))
+    .sort((a, b) => (a.expiryDate || '9999').localeCompare(b.expiryDate || '9999'));
+}
+
 export function expiringBatches() {
-  const limit = new Date();
-  limit.setDate(limit.getDate() + 30);
-  const limitIso = limit.toISOString().slice(0, 10);
+  const limitIso = expirySoonCutoff();
   return store.batches
     .filter((row) => row.qty > 0 && row.expiryDate && row.expiryDate.slice(0, 10) <= limitIso)
     .map((row) => {
       const found = findVariant(row.variantId);
+      const unit = store.units.find((item) => item.id === found?.product.unitId);
       return {
         id: row.id,
         product: found?.product.name ?? 'Product',
         batchNo: row.batchNo,
+        manufacturedDate: row.manufacturedDate || '',
         expiryDate: row.expiryDate.slice(0, 10),
         qty: row.qty,
+        unit: unit?.shortName || unit?.name || '',
       };
     })
     .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
@@ -1122,6 +1199,8 @@ export function cropProducts() {
         name: product.name,
         detail: [variant.size, variant.color].filter(Boolean).join(' · '),
         stockQty: variant.stockQty,
+        unitId: product.unitId,
+        unit: store.units.find((item) => item.id === product.unitId)?.shortName || store.units.find((item) => item.id === product.unitId)?.name || 'qty',
       })),
     );
 }
@@ -1157,6 +1236,7 @@ export async function upsertNamed(
     isInclusive: input.isInclusive ?? existing?.isInclusive ?? false,
     type: input.type ?? existing?.type,
     value: input.value ?? existing?.value,
+    equalsKg: input.equalsKg === undefined ? existing?.equalsKg : input.equalsKg,
     isActive: input.isActive ?? existing?.isActive ?? true,
   };
   await saveNamed(table, row, !existing);
@@ -1235,6 +1315,10 @@ export async function saveProduct(input: {
   isActive?: boolean;
   trackBatch?: boolean;
   isCrop?: boolean;
+  batchId?: string;
+  batchNo?: string;
+  manufacturedDate?: string;
+  expiryDate?: string;
   variants?: {
     id?: string;
     size?: string;
@@ -1256,7 +1340,16 @@ export async function saveProduct(input: {
   }
   const isCrop = Boolean(input.isCrop ?? existing?.isCrop);
   const trackBatch = isCrop ? false : Boolean(input.trackBatch ?? existing?.trackBatch);
-  if (isCrop || trackBatch) {
+  let batchDates: { manufacturedDate: string; expiryDate: string } | null = null;
+  if (trackBatch) {
+    const dates = readBatchDates(input, 'This product');
+    if ('error' in dates) throw new Error(dates.error);
+    batchDates = dates;
+    await requireCloudColumns([
+      { table: 'products', columns: PRODUCT_FLAG_COLUMNS },
+      { table: 'stock_batches', columns: STOCK_BATCH_COLUMNS },
+    ]);
+  } else if (isCrop) {
     await requireCloudColumns([{ table: 'products', columns: PRODUCT_FLAG_COLUMNS }]);
   }
   const sku = input.sku?.trim() || existing?.sku || nextDoc('product');
@@ -1324,6 +1417,29 @@ export async function saveProduct(input: {
   });
   if (existing) Object.assign(existing, row);
   else store.products.push(row);
+  if (batchDates) {
+    const variant = row.variants[0];
+    if (!variant) throw new Error('Add a pack before tracking a batch');
+    const batchNo = input.batchNo?.trim() || allocateBatchNo();
+    if (input.batchId) {
+      const current = store.batches.find((batch) => batch.id === input.batchId);
+      if (!current || !row.variants.some((pack) => pack.id === current.variantId)) {
+        throw new Error('That batch was not found');
+      }
+      const clash = store.batches.find(
+        (batch) => batch.variantId === current.variantId && batch.batchNo === batchNo && batch.id !== current.id,
+      );
+      if (clash) throw new Error('That batch number is already on this product');
+      current.batchNo = batchNo;
+      current.manufacturedDate = batchDates.manufacturedDate;
+      current.expiryDate = batchDates.expiryDate;
+      current.updatedAt = now();
+    } else {
+      const already = store.batches.some((batch) => row.variants.some((pack) => pack.id === batch.variantId));
+      const qty = existing ? (already ? 0 : variant.stockQty) : opening;
+      receiveBatch(variant.id, batchNo, batchDates.expiryDate, qty, batchDates.manufacturedDate);
+    }
+  }
   audit('products', existing ? 'update' : 'create', name);
   await persist();
   emit();
@@ -1380,7 +1496,14 @@ function postVoucher(
   return row;
 }
 
-type LineInput = { variantId: string; quantity: number; unitPrice: number; batchNo?: string; expiryDate?: string };
+type LineInput = {
+  variantId: string;
+  quantity: number;
+  unitPrice: number;
+  batchNo?: string;
+  manufacturedDate?: string;
+  expiryDate?: string;
+};
 type MoneyBits = {
   discountAmount?: number;
   additionAmount?: number;
@@ -1552,27 +1675,30 @@ export async function createPurchase(input: {
     if (!found) throw new Error('Product not found.');
     if (found.product.isCrop) throw new Error('Crops are bought on the crop slip.');
     if (found.product.trackBatch) {
-      const batchNo = line.batchNo?.trim() ?? '';
-      const expiryDate = line.expiryDate?.trim() ?? '';
-      if (!batchNo || !expiryDate) throw new Error(`${found.product.name}: batch number and expiry are required`);
-      line.batchNo = batchNo;
-      line.expiryDate = expiryDate;
+      const dates = readBatchDates(line, found.product.name);
+      if ('error' in dates) throw new Error(dates.error);
+      line.batchNo = line.batchNo?.trim() || allocateBatchNo();
+      line.manufacturedDate = dates.manufacturedDate;
+      line.expiryDate = dates.expiryDate;
       needsCloudBatch = true;
     } else {
       line.batchNo = '';
+      line.manufacturedDate = '';
       line.expiryDate = '';
     }
   }
   if (needsCloudBatch) {
     await requireCloudColumns([
-      { table: 'purchase_items', columns: ITEM_BATCH_COLUMNS },
+      { table: 'purchase_items', columns: PURCHASE_ITEM_BATCH_COLUMNS },
       { table: 'stock_batches', columns: STOCK_BATCH_COLUMNS },
     ]);
   }
   const items = makeLines(prepared);
   for (const line of items) {
     bumpStock(line.variantId, line.quantity);
-    if (line.batchNo) receiveBatch(line.variantId, line.batchNo, line.expiryDate || '', line.quantity);
+    if (line.batchNo) {
+      receiveBatch(line.variantId, line.batchNo, line.expiryDate || '', line.quantity, line.manufacturedDate);
+    }
   }
   const totals = computeDocTotals(
     items.reduce((s, l) => s + l.lineTotal, 0),
@@ -2083,6 +2209,26 @@ export function accountLedger(accountId: string, from?: string, to?: string) {
   return { account, lines, closing: balance };
 }
 
+function kilogramsOf(unit?: Named) {
+  if (!unit) return null;
+  if (unit.equalsKg != null && unit.equalsKg > 0) return unit.equalsKg;
+  const label = `${unit.shortName ?? ''} ${unit.name}`.toLowerCase();
+  if (label.includes('kg') || label.includes('kilogram')) return 1;
+  return null;
+}
+
+function weighFactor(productUnitId: string | null | undefined, weighUnitId?: string | null) {
+  if (!weighUnitId) return { factor: 1, name: null as string | null };
+  const chosen = store.units.find((unit) => unit.id === weighUnitId);
+  if (!chosen) throw new Error('Unit was not found');
+  const productUnit = productUnitId ? store.units.find((unit) => unit.id === productUnitId) : undefined;
+  if (!productUnit || chosen.id === productUnit.id) return { factor: 1, name: chosen.shortName || chosen.name };
+  const chosenKg = kilogramsOf(chosen);
+  const productKg = kilogramsOf(productUnit);
+  if (chosenKg == null || productKg == null) throw new Error('This unit has no kilogram number');
+  return { factor: chosenKg / productKg, name: chosen.shortName || chosen.name };
+}
+
 function cropCharge(value: number, label: string) {
   const amount = moneyRound(value);
   if (Number.isNaN(amount) || amount < 0) throw new Error(`${label} cannot be negative`);
@@ -2103,6 +2249,7 @@ export async function createCropPurchase(input: {
   cashPaid?: number;
   bankPaid?: number;
   remarks?: string;
+  weighUnitId?: string | null;
 }) {
   if (!input.docDate?.trim()) throw new Error('Date is required');
   if (input.partyType !== 'customer' && input.partyType !== 'vendor') throw new Error('Choose a farmer or a supplier');
@@ -2116,6 +2263,7 @@ export async function createCropPurchase(input: {
     input.partyType === 'customer' ? store.customers.find((row) => row.id === input.partyId && row.isActive) : store.vendors.find((row) => row.id === input.partyId && row.isActive);
   if (!party) throw new Error('That person was not found');
 
+  const weighed = weighFactor(found.product.unitId, input.weighUnitId);
   const vehicles: CropVehicle[] = input.vehicles.map((vehicle, index) => {
     const vehicleNo = String(vehicle.vehicleNo ?? '').trim();
     const bags = num(vehicle.bags);
@@ -2127,7 +2275,7 @@ export async function createCropPurchase(input: {
     if (Number.isNaN(kaat) || kaat < 0) throw new Error(`Vehicle ${index + 1}: kaat cannot be negative`);
     if (kaat >= totalWeight) throw new Error(`Vehicle ${index + 1}: kaat must be less than total weight`);
     if (Number.isNaN(rate) || rate < 0) throw new Error(`Vehicle ${index + 1}: rate is invalid`);
-    const safiWeight = moneyRound(totalWeight - kaat);
+    const safiWeight = moneyRound((totalWeight - kaat) * weighed.factor);
     return {
       id: newId(),
       vehicleNo,
@@ -2136,7 +2284,9 @@ export async function createCropPurchase(input: {
       kaat: moneyRound(kaat),
       safiWeight,
       rate: moneyRound(rate),
-      amount: moneyRound(safiWeight * rate),
+      amount: moneyRound(totalWeight * rate),
+      stockFactor: weighed.factor,
+      weighUnit: weighed.name,
     };
   });
   const charges = {
@@ -2221,9 +2371,15 @@ export async function createCropSale(input: {
   variantId: string;
   weight: number;
   rate: number;
+  commission?: number;
+  brokerage?: number;
+  mazdoori?: number;
+  fees?: number;
+  bardana?: number;
   cashPaid?: number;
   bankPaid?: number;
   remarks?: string;
+  weighUnitId?: string | null;
 }) {
   if (!input.docDate?.trim()) throw new Error('Date is required');
   if (!input.customerId) throw new Error('Buyer is required');
@@ -2235,12 +2391,24 @@ export async function createCropSale(input: {
   const found = findVariant(input.variantId);
   if (!found) throw new Error('Crop pack was not found');
   if (!found.product.isCrop) throw new Error('Mark this product as a crop on the product page first');
-  if (found.variant.stockQty < weight) throw new Error(`Only ${moneyRound(found.variant.stockQty)} is in stock`);
+  const weighed = weighFactor(found.product.unitId, input.weighUnitId);
+  const stockOut = moneyRound(weight * weighed.factor);
+  if (found.variant.stockQty + 0.0001 < stockOut) throw new Error(`Only ${moneyRound(found.variant.stockQty)} is in stock`);
   const customer = store.customers.find((row) => row.id === input.customerId && row.isActive);
   if (!customer) throw new Error('Buyer was not found');
   const amount = moneyRound(weight * rate);
+  const charges = {
+    commission: cropCharge(num(input.commission), 'commission'),
+    brokerage: cropCharge(num(input.brokerage), 'brokerage'),
+    mazdoori: cropCharge(num(input.mazdoori), 'mazdoori'),
+    fees: cropCharge(num(input.fees), 'fees'),
+    bardana: cropCharge(num(input.bardana), 'bardana'),
+  };
+  const deductionAmount = moneyRound(charges.commission + charges.brokerage + charges.mazdoori + charges.fees + charges.bardana);
+  if (deductionAmount > amount) throw new Error('Charges are higher than the crop amount');
+  const netAmount = moneyRound(amount - deductionAmount);
   const settled = resolveSettlement({
-    grandTotal: amount,
+    grandTotal: netAmount,
     cashPaid: input.cashPaid,
     bankPaid: input.bankPaid,
   });
@@ -2249,8 +2417,8 @@ export async function createCropSale(input: {
 
   const docNo = nextCropDoc('crop_sale');
   const docDate = input.docDate.trim();
-  const cost = moneyRound(weight * Number(found.variant.costPrice || found.product.costPrice || 0));
-  const legs = cropSaleEntries(settled, amount, cost, `Crop sale ${docNo}`);
+  const cost = moneyRound(stockOut * Number(found.variant.costPrice || found.product.costPrice || 0));
+  const legs = cropSaleEntries(settled, netAmount, cost, `Crop sale ${docNo}`);
   const voucher = postVoucher({
     voucherNo: docNo,
     voucherType: 'crop_sale',
@@ -2260,10 +2428,10 @@ export async function createCropSale(input: {
     accountId: legs.headerAccountId,
     referenceNo: docNo,
     notes: input.remarks?.trim() ?? '',
-    grandTotal: amount,
+    grandTotal: netAmount,
     entries: legs.entries,
   });
-  bumpStock(found.variant.id, -weight);
+  bumpStock(found.variant.id, -stockOut);
   const doc: CropSale = {
     id: newId(),
     voucherId: voucher.id,
@@ -2276,6 +2444,12 @@ export async function createCropSale(input: {
     weight: moneyRound(weight),
     rate: moneyRound(rate),
     amount,
+    stockFactor: weighed.factor,
+    weighUnit: weighed.name,
+    ...charges,
+    deductionAmount,
+    netAmount,
+    costAmount: cost,
     paidAmount: settled.paidAmount,
     cashPaid: settled.cashPaid,
     bankPaid: settled.bankPaid,
@@ -2288,6 +2462,270 @@ export async function createCropSale(input: {
   await persist();
   emit();
   return doc;
+}
+
+function retireVoucher(id: string) {
+  const row = store.vouchers.find((voucher) => voucher.id === id);
+  if (!row || row.status === 'cancelled') return;
+  row.status = 'cancelled';
+  row.voucherNo = `VOID-${id.slice(0, 8)}`;
+}
+
+export function listCropPurchases(partyType?: 'customer' | 'vendor') {
+  return store.cropPurchases.filter((row) => row.status !== 'deleted' && (!partyType || row.partyType === partyType));
+}
+
+export function listCropSales() {
+  return store.cropSales.filter((row) => row.status !== 'deleted');
+}
+
+function pricedCropVehicles(
+  rows: { vehicleNo: string; bags: number; totalWeight: number; kaat: number; rate: number }[],
+  factor = 1,
+  weighUnit: string | null = null,
+) {
+  return rows.map((vehicle, index) => {
+    const vehicleNo = String(vehicle.vehicleNo ?? '').trim();
+    const bags = num(vehicle.bags);
+    const totalWeight = num(vehicle.totalWeight);
+    const kaat = num(vehicle.kaat);
+    const rate = num(vehicle.rate);
+    if (!vehicleNo) throw new Error(`Vehicle ${index + 1}: number is required`);
+    if (!(totalWeight > 0)) throw new Error(`Vehicle ${index + 1}: quantity must be greater than 0`);
+    if (Number.isNaN(kaat) || kaat < 0) throw new Error(`Vehicle ${index + 1}: kaat cannot be negative`);
+    if (kaat >= totalWeight) throw new Error(`Vehicle ${index + 1}: kaat must be less than the quantity`);
+    if (Number.isNaN(rate) || rate < 0) throw new Error(`Vehicle ${index + 1}: rate is invalid`);
+    const safiWeight = moneyRound((totalWeight - kaat) * factor);
+    return {
+      id: newId(),
+      vehicleNo,
+      bags: moneyRound(Number.isNaN(bags) ? 0 : bags),
+      totalWeight: moneyRound(totalWeight),
+      kaat: moneyRound(kaat),
+      safiWeight,
+      rate: moneyRound(rate),
+      amount: moneyRound(totalWeight * rate),
+      stockFactor: factor,
+      weighUnit,
+    };
+  });
+}
+
+export async function updateCropPurchase(
+  id: string,
+  input: {
+    docDate: string;
+    partyType: 'customer' | 'vendor';
+    partyId: string;
+    variantId: string;
+    vehicles: { vehicleNo: string; bags: number; totalWeight: number; kaat: number; rate: number }[];
+    commission?: number;
+    brokerage?: number;
+    mazdoori?: number;
+    fees?: number;
+    bardana?: number;
+    cashPaid?: number;
+    bankPaid?: number;
+    remarks?: string;
+    weighUnitId?: string | null;
+  },
+) {
+  const existing = store.cropPurchases.find((row) => row.id === id && row.status !== 'deleted');
+  if (!existing) throw new Error('Slip was not found');
+  const found = findVariant(input.variantId);
+  if (!found || !found.product.isCrop) throw new Error('Crop pack was not found');
+  const weighed = weighFactor(found.product.unitId, input.weighUnitId);
+  const vehicles = pricedCropVehicles(input.vehicles, weighed.factor, weighed.name);
+  const charges = {
+    commission: cropCharge(num(input.commission), 'commission'),
+    brokerage: cropCharge(num(input.brokerage), 'brokerage'),
+    mazdoori: cropCharge(num(input.mazdoori), 'mazdoori'),
+    fees: cropCharge(num(input.fees), 'fees'),
+    bardana: cropCharge(num(input.bardana), 'bardana'),
+  };
+  const grossAmount = moneyRound(vehicles.reduce((sum, vehicle) => sum + vehicle.amount, 0));
+  const deductionAmount = moneyRound(charges.commission + charges.brokerage + charges.mazdoori + charges.fees + charges.bardana);
+  const netPayable = moneyRound(grossAmount - deductionAmount);
+  if (netPayable < 0) throw new Error('Deductions are higher than the crop amount');
+  const safiWeight = moneyRound(vehicles.reduce((sum, vehicle) => sum + vehicle.safiWeight, 0));
+  const old = findVariant(existing.variantId);
+  if (!old || old.variant.stockQty + 0.0001 < existing.safiWeight) {
+    throw new Error('This quantity has already been sold, so the slip cannot be changed');
+  }
+  const party =
+    input.partyType === 'customer'
+      ? store.customers.find((row) => row.id === input.partyId && row.isActive)
+      : store.vendors.find((row) => row.id === input.partyId && row.isActive);
+  if (!party) throw new Error('That person was not found');
+  const settled = resolveSettlement({ grandTotal: netPayable, cashPaid: input.cashPaid, bankPaid: input.bankPaid });
+  if ('error' in settled) throw new Error(settled.error);
+  bumpStock(existing.variantId, -existing.safiWeight);
+  bumpStock(found.variant.id, safiWeight);
+  if (safiWeight > 0) {
+    const cost = moneyRound(netPayable / safiWeight);
+    found.variant.costPrice = cost;
+    found.product.costPrice = cost;
+  }
+  retireVoucher(existing.voucherId);
+  const legs = cropPurchaseEntries(settled, netPayable, input.partyType, `Crop purchase ${existing.docNo}`);
+  const voucher = postVoucher({
+    voucherNo: existing.docNo,
+    voucherType: input.partyType === 'customer' ? 'crop_purchase' : 'purchase',
+    voucherDate: input.docDate.trim(),
+    partyId: party.id,
+    partyName: party.name,
+    accountId: legs.headerAccountId,
+    referenceNo: existing.docNo,
+    notes: input.remarks?.trim() ?? '',
+    grandTotal: netPayable,
+    entries: legs.entries,
+  });
+  Object.assign(existing, {
+    voucherId: voucher.id,
+    docDate: input.docDate.trim(),
+    partyType: input.partyType,
+    partyId: party.id,
+    partyName: party.name,
+    variantId: found.variant.id,
+    productName: found.product.name,
+    safiWeight,
+    grossAmount,
+    ...charges,
+    deductionAmount,
+    netPayable,
+    paidAmount: settled.paidAmount,
+    cashPaid: settled.cashPaid,
+    bankPaid: settled.bankPaid,
+    remarks: input.remarks?.trim() ?? '',
+    vehicles,
+    updatedAt: now(),
+  });
+  audit('crop', 'purchase-edit', existing.docNo);
+  await persist();
+  emit();
+  return existing;
+}
+
+export async function deleteCropPurchase(id: string) {
+  const existing = store.cropPurchases.find((row) => row.id === id && row.status !== 'deleted');
+  if (!existing) throw new Error('Slip was not found');
+  const old = findVariant(existing.variantId);
+  if (!old || old.variant.stockQty + 0.0001 < existing.safiWeight) {
+    throw new Error('This quantity has already been sold, so the slip cannot be reversed');
+  }
+  bumpStock(existing.variantId, -existing.safiWeight);
+  retireVoucher(existing.voucherId);
+  existing.status = 'deleted';
+  existing.updatedAt = now();
+  audit('crop', 'purchase-reverse', existing.docNo);
+  await persist();
+  emit();
+}
+
+export async function updateCropSale(
+  id: string,
+  input: {
+    docDate: string;
+    customerId: string;
+    variantId: string;
+    weight: number;
+    rate: number;
+    commission?: number;
+    brokerage?: number;
+    mazdoori?: number;
+    fees?: number;
+    bardana?: number;
+    cashPaid?: number;
+    bankPaid?: number;
+    remarks?: string;
+    weighUnitId?: string | null;
+  },
+) {
+  const existing = store.cropSales.find((row) => row.id === id && row.status !== 'deleted');
+  if (!existing) throw new Error('Slip was not found');
+  const weight = num(input.weight);
+  const rate = num(input.rate);
+  if (!(weight > 0)) throw new Error('Quantity must be greater than 0');
+  if (Number.isNaN(rate) || rate < 0) throw new Error('Rate is invalid');
+  const found = findVariant(input.variantId);
+  if (!found || !found.product.isCrop) throw new Error('Crop pack was not found');
+  const old = findVariant(existing.variantId);
+  if (!old) throw new Error('The old crop pack was not found');
+  const weighed = weighFactor(found.product.unitId, input.weighUnitId);
+  const stockOut = moneyRound(weight * weighed.factor);
+  const oldStock = moneyRound(existing.weight * (existing.stockFactor || 1));
+  const available = old.variant.id === found.variant.id ? old.variant.stockQty + oldStock : found.variant.stockQty;
+  if (available + 0.0001 < stockOut) throw new Error(`Only ${moneyRound(available)} is in stock`);
+  const customer = store.customers.find((row) => row.id === input.customerId && row.isActive);
+  if (!customer) throw new Error('Buyer was not found');
+  const amount = moneyRound(weight * rate);
+  const charges = {
+    commission: cropCharge(num(input.commission), 'commission'),
+    brokerage: cropCharge(num(input.brokerage), 'brokerage'),
+    mazdoori: cropCharge(num(input.mazdoori), 'mazdoori'),
+    fees: cropCharge(num(input.fees), 'fees'),
+    bardana: cropCharge(num(input.bardana), 'bardana'),
+  };
+  const deductionAmount = moneyRound(charges.commission + charges.brokerage + charges.mazdoori + charges.fees + charges.bardana);
+  if (deductionAmount > amount) throw new Error('Charges are higher than the crop amount');
+  const netAmount = moneyRound(amount - deductionAmount);
+  const settled = resolveSettlement({ grandTotal: netAmount, cashPaid: input.cashPaid, bankPaid: input.bankPaid });
+  if ('error' in settled) throw new Error(settled.error);
+  const cost = moneyRound(stockOut * Number(found.variant.costPrice || found.product.costPrice || 0));
+  bumpStock(existing.variantId, oldStock);
+  bumpStock(found.variant.id, -stockOut);
+  retireVoucher(existing.voucherId);
+  const legs = cropSaleEntries(settled, netAmount, cost, `Crop sale ${existing.docNo}`);
+  const voucher = postVoucher({
+    voucherNo: existing.docNo,
+    voucherType: 'crop_sale',
+    voucherDate: input.docDate.trim(),
+    partyId: customer.id,
+    partyName: customer.name,
+    accountId: legs.headerAccountId,
+    referenceNo: existing.docNo,
+    notes: input.remarks?.trim() ?? '',
+    grandTotal: netAmount,
+    entries: legs.entries,
+  });
+  Object.assign(existing, {
+    voucherId: voucher.id,
+    docDate: input.docDate.trim(),
+    customerId: customer.id,
+    customerName: customer.name,
+    variantId: found.variant.id,
+    productName: found.product.name,
+    weight: moneyRound(weight),
+    rate: moneyRound(rate),
+    amount,
+    stockFactor: weighed.factor,
+    weighUnit: weighed.name,
+    ...charges,
+    deductionAmount,
+    netAmount,
+    costAmount: cost,
+    paidAmount: settled.paidAmount,
+    cashPaid: settled.cashPaid,
+    bankPaid: settled.bankPaid,
+    remarks: input.remarks?.trim() ?? '',
+    updatedAt: now(),
+  });
+  audit('crop', 'sale-edit', existing.docNo);
+  await persist();
+  emit();
+  return existing;
+}
+
+export async function deleteCropSale(id: string) {
+  const existing = store.cropSales.find((row) => row.id === id && row.status !== 'deleted');
+  if (!existing) throw new Error('Slip was not found');
+  bumpStock(existing.variantId, moneyRound(existing.weight * (existing.stockFactor || 1)));
+  retireVoucher(existing.voucherId);
+  existing.status = 'deleted';
+  existing.updatedAt = now();
+  audit('crop', 'sale-reverse', existing.docNo);
+  await persist();
+  emit();
 }
 
 export function partyLedger(kind: 'customer' | 'vendor', partyId: string, from?: string, to?: string) {
@@ -2362,6 +2800,9 @@ export function purchasesReport(from?: string, to?: string) {
 }
 export function profitReport(from?: string, to?: string) {
   const sales = salesReport(from, to).totalGrand;
+  const cropSales = store.cropSales.filter((row) => row.status !== 'deleted' && inRange(row.docDate, from, to));
+  const cropNet = cropSales.reduce((sum, row) => sum + (row.netAmount ?? row.amount - (row.deductionAmount ?? 0)), 0);
+  const cropCost = cropSales.reduce((sum, row) => sum + (row.costAmount ?? 0), 0);
   const purchases = purchasesReport(from, to).totalGrand;
   const expenses = listVouchers('expense')
     .filter((v) => v.status === 'posted' && inRange(v.voucherDate, from, to))
@@ -2369,7 +2810,7 @@ export function profitReport(from?: string, to?: string) {
   const income = listVouchers('income')
     .filter((v) => v.status === 'posted' && inRange(v.voucherDate, from, to))
     .reduce((s, v) => s + v.grandTotal, 0);
-  return { sales, purchases, expenses, income, profit: sales + income - purchases - expenses };
+  return { sales, purchases, expenses, income, profit: sales + cropNet - cropCost + income - purchases - expenses };
 }
 export function stockReport() {
   return inventoryRows();

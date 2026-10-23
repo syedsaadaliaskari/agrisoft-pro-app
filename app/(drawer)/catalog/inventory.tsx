@@ -25,7 +25,9 @@ export default function InventoryScreen() {
             {expiringBatches().length ? (
               expiringBatches().map((row) => (
                 <Text key={row.id} style={{ color: colors.text, fontWeight: '700', minHeight: 44 }}>
-                  {row.product} · {row.batchNo} · {row.expiryDate} · Qty {row.qty}
+                  {row.product} · {row.batchNo}
+                  {row.manufacturedDate ? ` · Made ${row.manufacturedDate}` : ''} · Expires {row.expiryDate} · Qty {row.qty}
+                  {row.unit ? ` ${row.unit}` : ''}
                 </Text>
               ))
             ) : (
